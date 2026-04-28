@@ -53,7 +53,7 @@ Each stage has a single responsibility and can be evolved or replaced independen
 JTFix is currently in active development and can be run from source.
 
 ```bash
-git clone <repository-url>
+git clone https://www.github.com/AurelienDelcey/JTFix-Java-Typo-Fixer.git
 cd JTFix
 mvn exec:java
 ```
