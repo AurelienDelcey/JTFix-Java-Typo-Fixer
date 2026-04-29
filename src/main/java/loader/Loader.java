@@ -4,10 +4,15 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import shared.Failure;
 import shared.PipeResult;
@@ -26,6 +31,30 @@ public class Loader {
 				result.put(loadedFile.path(), loadedFile.context());
 			} catch (IOException e) {
 				return new Failure<>("loader failed: " + path + " // " + e.getMessage());
+			}
+		}
+		return new Success<>(result);
+	}
+	
+	public static PipeResult<Map<Path, DataContext>> loadParallel(List<Path> pathList){
+		int workers = Runtime.getRuntime().availableProcessors();
+		ExecutorService exec = Executors.newFixedThreadPool(workers);
+		List<Future<LoadingResult>> resultList = new ArrayList<>();
+		Map<Path, DataContext> result = new HashMap<>();
+		for(Path path : pathList) {
+			Future<LoadingResult> loadedFile = exec.submit(() -> loadOne(path));
+			resultList.add(loadedFile);
+		}
+		exec.shutdown();
+		for(Future<LoadingResult> loadedFile : resultList) {
+			try {
+				LoadingResult file = loadedFile.get();
+				result.put(file.path(), file.context());
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return new Failure<>("loader failed: " + e.getMessage());
+			} catch (ExecutionException e) {
+				return new Failure<>("loader failed: " + e.getMessage());
 			}
 		}
 		return new Success<>(result);
