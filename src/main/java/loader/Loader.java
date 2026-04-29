@@ -26,6 +26,7 @@ public class Loader {
 				char[] fileContent = new char[INITIAL_ARRAY_SIZE];
 				int[] linesOffsets = new int[INITIAL_ARRAY_SIZE];
 				int lineCounter = 0;
+				int charCounter = 0;
 				
 				for(int i=0; i>=0; i++) {
 					int charCode = reader.read();
@@ -50,6 +51,9 @@ public class Loader {
 						linesOffsets = resizeIntArray(linesOffsets);
 					}
 				}
+				
+				fileContent = Arrays.copyOf(fileContent, charCounter);
+				linesOffsets = Arrays.copyOf(linesOffsets, lineCounter);
 				result.put(path, new DataContext(fileContent,linesOffsets));
 				
 			} catch (IOException e) {
