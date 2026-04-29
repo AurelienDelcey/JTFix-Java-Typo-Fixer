@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,31 +23,35 @@ public class Loader {
 		for(Path path : pathList) {
 			try(BufferedReader reader = Files.newBufferedReader(path)){
 				
-				char[] text = new char[INITIAL_ARRAY_SIZE];
-				int[] lineOffset = new int[INITIAL_ARRAY_SIZE];
+				char[] fileContent = new char[INITIAL_ARRAY_SIZE];
+				int[] linesOffsets = new int[INITIAL_ARRAY_SIZE];
 				int lineCounter = 0;
 				
 				for(int i=0; i>=0; i++) {
-					int code = reader.read();
-					if(code == -1) {
+					int charCode = reader.read();
+					if(isEndOfFile(charCode)) {
 						break;
 					}
-					char current = (char) code;
-					if(current == '\n') {
-						lineOffset[lineCounter] = i;
+					char current = (char) charCode;
+					
+					if(isEndOfLine(current)) {
+						linesOffsets[lineCounter] = i;
 						lineCounter++;
 					}
-					text[i] = current;
 					
-					if(i == text.length-1) {
-						text = charArrayGrowth(text);
+					fileContent[i] = current;
+					charCounter++;
+					
+					if(i == fileContent.length-1) {
+						fileContent = resizeCharArray(fileContent);
 					}
 					
-					if(lineCounter == lineOffset.length-1) {
-						lineOffset = intArrayGrowth(lineOffset);
+					if(lineCounter == linesOffsets.length-1) {
+						linesOffsets = resizeIntArray(linesOffsets);
 					}
 				}
-				result.put(path, new DataContext(text,lineOffset));
+				result.put(path, new DataContext(fileContent,linesOffsets));
+				
 			} catch (IOException e) {
 				return new Failure<>("fail!");
 			}
@@ -54,22 +59,22 @@ public class Loader {
 		return new Success<>(result);
 	}
 
-	private static char[] charArrayGrowth(char[] initialArray) {
+	private static char[] resizeCharArray(char[] initialArray) {
 		int newSize = (int) (initialArray.length*GROWTH_FACTOR);
-		char[] newArray = new char[newSize];
-		for(int i=0; i<initialArray.length; i++) {
-			newArray[i] = initialArray[i];
-		}
-		return newArray;
+		return Arrays.copyOf(initialArray, newSize);
 	}
 	
-	private static int[] intArrayGrowth(int[] initialArray) {
+	private static int[] resizeIntArray(int[] initialArray) {
 		int newSize = (int) (initialArray.length*GROWTH_FACTOR);
-		int[] newArray = new int[newSize];
-		for(int i=0; i<initialArray.length; i++) {
-			newArray[i] = initialArray[i];
-		}
-		return newArray;
+		return Arrays.copyOf(initialArray, newSize);
+	}
+
+	private static boolean isEndOfFile(int code) {
+		return code == -1;
+	}
+
+	private static boolean isEndOfLine(char current) {
+		return current == '\n';
 	}
 	
 }

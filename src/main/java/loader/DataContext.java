@@ -1,5 +1,5 @@
 package loader;
 
-public record DataContext(char[] text, int[] lineOffset) {
+public record DataContext(char[] fileContent, int[] linesOffsets) {
 
 }
