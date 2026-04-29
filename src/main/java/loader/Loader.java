@@ -21,46 +21,52 @@ public class Loader {
 	public static PipeResult<Map<Path, DataContext>> load(List<Path> pathList){
 		Map<Path, DataContext> result = new HashMap<>();
 		for(Path path : pathList) {
-			try(BufferedReader reader = Files.newBufferedReader(path)){
-				
-				char[] fileContent = new char[INITIAL_ARRAY_SIZE];
-				int[] linesOffsets = new int[INITIAL_ARRAY_SIZE];
-				int lineCounter = 0;
-				int charCounter = 0;
-				
-				for(int i=0; i>=0; i++) {
-					int charCode = reader.read();
-					if(isEndOfFile(charCode)) {
-						break;
-					}
-					char current = (char) charCode;
-					
-					if(isEndOfLine(current)) {
-						linesOffsets[lineCounter] = i;
-						lineCounter++;
-					}
-					
-					fileContent[i] = current;
-					charCounter++;
-					
-					if(i == fileContent.length-1) {
-						fileContent = resizeCharArray(fileContent);
-					}
-					
-					if(lineCounter == linesOffsets.length-1) {
-						linesOffsets = resizeIntArray(linesOffsets);
-					}
-				}
-				
-				fileContent = Arrays.copyOf(fileContent, charCounter);
-				linesOffsets = Arrays.copyOf(linesOffsets, lineCounter);
-				result.put(path, new DataContext(fileContent,linesOffsets));
-				
+			try {
+				LoadingResult loadedFile = loadOne(path);
+				result.put(loadedFile.path(), loadedFile.context());
 			} catch (IOException e) {
-				return new Failure<>("fail!");
+				return new Failure<>("loader failed: " + path + " // " + e.getMessage());
 			}
 		}
 		return new Success<>(result);
+	}
+
+	private static LoadingResult loadOne(Path path) throws IOException {
+		try(BufferedReader reader = Files.newBufferedReader(path)){
+			
+			char[] fileContent = new char[INITIAL_ARRAY_SIZE];
+			int[] linesOffsets = new int[INITIAL_ARRAY_SIZE];
+			int lineCounter = 0;
+			int charCounter = 0;
+			
+			for(int i=0; i>=0; i++) {
+				int charCode = reader.read();
+				if(isEndOfFile(charCode)) {
+					break;
+				}
+				char current = (char) charCode;
+				
+				if(isEndOfLine(current)) {
+					linesOffsets[lineCounter] = i;
+					lineCounter++;
+				}
+				
+				fileContent[i] = current;
+				charCounter++;
+				
+				if(i == fileContent.length-1) {
+					fileContent = resizeCharArray(fileContent);
+				}
+				
+				if(lineCounter == linesOffsets.length-1) {
+					linesOffsets = resizeIntArray(linesOffsets);
+				}
+			}
+			
+			fileContent = Arrays.copyOf(fileContent, charCounter);
+			linesOffsets = Arrays.copyOf(linesOffsets, lineCounter);
+			return new LoadingResult(path, new DataContext(fileContent, linesOffsets));
+		}
 	}
 
 	private static char[] resizeCharArray(char[] initialArray) {
