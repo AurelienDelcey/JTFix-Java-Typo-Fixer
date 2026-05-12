@@ -15,6 +15,13 @@ import shared.PipeResult;
 
 public class Extractor {
 	
+	private final Deque<TypeContext> context = new ArrayDeque<>();
+	private PreparedContext preparedContext = null;
+	private boolean inWord = false;
+	private int startIndex = 0;
+	private int braceDepth = 0;
+	private int parenDepth = 0;
+	
 	private final static Set<String> JAVA_KEY_WORD = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
 			"float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new",
@@ -22,7 +29,7 @@ public class Extractor {
 			"synchronized", "this", "throw", "throws", "transient", "try", "void", "volatile", "while", "var", "record",
 			"sealed", "permits", "non-sealed", "true", "false", "null", "Enum", "Record", "Class");
 	
-	public static List<String> extract(Map<Path, DataContext>pathList) {
+	public List<String> extract(Map<Path, DataContext>pathList) {
 		final List<String> words = new ArrayList<>();
 		pathList.keySet().stream()
 						 .forEach(i->{
@@ -32,14 +39,9 @@ public class Extractor {
 		return words;
 	}
 	
-	private static List<String> findWords(DataContext file) {
+	private List<String> findWords(DataContext file) {
 		List<String> words = new ArrayList<>();
-		PreparedContext preparedContext = null;
-		Deque<TypeContext> context = new ArrayDeque<>();
-		boolean inWord = false;
-		int startIndex = 0;
-		int braceDepth = 0;
-		int parenDepth = 0;
+		
 		char[] data = file.fileContent();
 		for(int i=0; i<data.length; i++) {
 			char currentChar = data[i];
