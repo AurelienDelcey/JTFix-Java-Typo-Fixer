@@ -8,7 +8,10 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import loader.DataContext;
 import shared.PipeResult;
@@ -18,7 +21,7 @@ public class Extractor {
 	private final Deque<TypeContext> context = new ArrayDeque<>();
 	private PreparedContext preparedContext = null;
 	private boolean inWord = false;
-	private int startIndex = 0;
+	private int startIndex = -1;
 	private int braceDepth = 0;
 	private int parenDepth = 0;
 	
@@ -30,70 +33,98 @@ public class Extractor {
 			"sealed", "permits", "non-sealed", "true", "false", "null", "Enum", "Record", "Class");
 	
 	public List<String> extract(Map<Path, DataContext>pathList) {
-		final List<String> words = new ArrayList<>();
+		final List<String> tokens = new ArrayList<>();
 		pathList.keySet().stream()
 						 .forEach(i->{
 							 DataContext file = pathList.get(i);
-							 words.addAll(findWords(file));
+							 tokens.addAll(findTokens(file));
 						 });
-		return words;
+		return tokens;
 	}
 	
-	private List<String> findWords(DataContext file) {
-		List<String> words = new ArrayList<>();
+	private List<String> findTokens(DataContext datacontext) {
+		List<String> tokens = new ArrayList<>();
 		
-		char[] data = file.fileContent();
-		for(int i=0; i<data.length; i++) {
-			char currentChar = data[i];
-			if(currentChar == '{') {
-				braceDepth++;
-					if(preparedContext != null) {
-						context.push(preparedContext.context());
-						preparedContext = null;
-					}
-				}
-			if(currentChar == '}') {
-				braceDepth--;
-				if (context.peek() != null) {
-					context.pop();
-				}
-				}
-			if(currentChar == '(') {parenDepth++;}
-			if(currentChar == ')') {parenDepth--;}
-			if(inWord == false && isIdentifyerStart(currentChar)) {
-				startIndex = i;
-				inWord = true;
-			}
-			if(inWord == true && !isIdentifyerPart(currentChar)) {
-				if (i-startIndex > 1) {
-					String word = getFromIndex(startIndex, i, data);
-					if (!JAVA_KEY_WORD.contains(word)) {
-						words.add(word);
-					}else {
-						if(Objects.equals("class", word)) {
-							preparedContext = new PreparedContext(TypeContext.IN_CLASS);
-						}
-					}
-				}
-				startIndex = 0;
-				inWord = false;
-			}
+		char[] file = datacontext.fileContent();
+		for(int i=0; i<file.length; i++) {
+			char currentChar = file[i];
+			Optional<String> maybeWord = handleChar(currentChar, i, file);
+			maybeWord.ifPresent((word)-> handleWord(word, (token)->tokens.add(token)));
 		}
-		if (inWord) {
-		    words.add(getFromIndex(startIndex, data.length, data));
+		if (inWord) {handleWord(getFromIndex(startIndex, file.length, file), (token)->tokens.add(token));}
+		return tokens;
+	}
+	
+	private void handleWord(String word, Consumer<String> add) {
+		if (JAVA_KEY_WORD.contains(word)) {prepareContext(word);return;}
+		add.accept(word);
+	}
+	
+	private void prepareContext(String word) {
+		if(Objects.equals("class", word)) {preparedContext = new PreparedContext(TypeContext.IN_CLASS);}
+	}
+	
+	private Optional<String> handleChar(char c, int index, char[] file){
+		if(inWord == false && isIdentifyerStart(c)) {startWordDetection(index); return Optional.empty();}
+		if(inWord == true && !isIdentifyerPart(c)){
+				String word = getWord(index, file);
+				stopWordDetection();
+				return word != null ? Optional.of(word) : Optional.empty();
+			}
+		updateParenDepth(c);
+		updateBraceDepth(c);
+		return Optional.empty();
+	}
+	
+	private void updateParenDepth(char c) {
+		if(c == '(') {parenDepth++;}
+		if(c == ')') {parenDepth--;}
+	}
+	
+	private void updateBraceDepth(char c) {
+		if(c == '{') {braceDepth++; commitContext();}
+		if(c == '}') {braceDepth--; popContext();}
+	}
+	
+	private void commitContext() {
+		if(preparedContext != null) {
+			context.push(preparedContext.context());
+			preparedContext = null;
 		}
-		return words;
+	}
+	
+	private void popContext() {
+		if (context.peek() != null) {
+			context.pop();
+		}
+	}
+	
+	private String getWord(int index, char[] file) {
+		if (index-startIndex > 1) {
+			return getFromIndex(startIndex, index, file);
+		}
+		return null;
+	}
+	
+	private void startWordDetection(int index) {
+		startIndex = index;
+		inWord = true;
+	}
+	
+	private void stopWordDetection() {
+		startIndex = -1;
+		inWord = false;
 	}
 
-	private static String getFromIndex(int startIndex, int i, char[] data) {
-		return String.copyValueOf(data, startIndex, i-startIndex);
+	private String getFromIndex(int startIndex, int i, char[] file) {
+		return String.copyValueOf(file, startIndex, i-startIndex);
 	}
 
-	private static boolean isIdentifyerPart (char c) {
+	private boolean isIdentifyerPart (char c) {
 		return Character.isLetterOrDigit(c) || c == '_' || c == '$';
 	}
 	
-	private static boolean isIdentifyerStart (char c) {
+	private boolean isIdentifyerStart (char c) {
 		return Character.isLetter(c) || c == '_' || c == '$';
 	}
 }
