@@ -21,9 +21,16 @@ public class Extractor {
 	private final Deque<TypeContext> context = new ArrayDeque<>();
 	private PreparedContext preparedContext = null;
 	private boolean inWord = false;
+	private boolean inDoBlock = false;
+	private boolean escape = false;
+	private boolean firstStepLambdaSequence = false;
+	private boolean secondStepLambdaSequence = false;
+	private boolean followLambdaDepth = false;
 	private int startIndex = -1;
 	private int braceDepth = 0;
 	private int parenDepth = 0;
+	private int relativeLambdaParentDepth = -1;
+	private char prevChar = ' ';
 	
 	private final static Set<String> JAVA_KEY_WORD = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
@@ -52,30 +59,107 @@ public class Extractor {
 			maybeWord.ifPresent((word)-> handleWord(word, (token)->tokens.add(token)));
 		}
 		if (inWord) {handleWord(getFromIndex(startIndex, file.length, file), (token)->tokens.add(token));}
+		cleanContext();
 		return tokens;
+	}
+
+	private void cleanContext() {
+		preparedContext=null;
+		startIndex = -1;
+		inWord = false;
+		braceDepth=0;
+		parenDepth=0;
+		context.clear();
 	}
 	
 	private void handleWord(String word, Consumer<String> add) {
+		if("do".equals(word)) {inDoBlock = true;}
+		if("while".equals(word) && inDoBlock) {inDoBlock = false;return;}
+		if("class".equals(word) && prevChar == '.') {prevChar = ' ';return;}
 		if (JAVA_KEY_WORD.contains(word)) {prepareContext(word);return;}
 		add.accept(word);
 	}
 	
 	private void prepareContext(String word) {
-		if(Objects.equals("class", word)) {preparedContext = new PreparedContext(TypeContext.IN_CLASS);}
+		switch(word) {
+		case "class" -> preparedContext = new PreparedContext(TypeContext.IN_CLASS);
+		case "record" -> preparedContext = new PreparedContext(TypeContext.IN_RECORD);
+		case "interface" -> preparedContext = new PreparedContext(TypeContext.IN_INTERFACE);
+		case "enum" -> preparedContext = new PreparedContext(TypeContext.IN_ENUM);
+		case "if" -> preparedContext = new PreparedContext(TypeContext.IN_IF);
+		case "for" -> preparedContext = new PreparedContext(TypeContext.IN_FOR);
+		case "while" -> preparedContext = new PreparedContext(TypeContext.IN_WHILE);
+		case "do" -> preparedContext = new PreparedContext(TypeContext.IN_DO);
+		case "try" -> preparedContext = new PreparedContext(TypeContext.IN_TRY);
+		case "catch" -> preparedContext = new PreparedContext(TypeContext.IN_CATCH);
+		case "switch" -> preparedContext = new PreparedContext(TypeContext.IN_SWITCH);
+		case "finaly" -> preparedContext = new PreparedContext(TypeContext.IN_FINALY);
+		case "else" -> preparedContext = new PreparedContext(TypeContext.IN_ELSE);
+		}
 	}
 	
 	private Optional<String> handleChar(char c, int index, char[] file){
+		if(escape) {escape = false; return Optional.empty();}
+		if(c=='\\') {escape = true; return Optional.empty();}
+		checkForIgnoredContexts(c);
+		if(context.peek() == TypeContext.IN_CHAR || context.peek() == TypeContext.IN_STRING) {return Optional.empty();}
+		checkForLambda(c);
+		checkForClassKeyConsistency(c);
+		updateParenDepth(c);
+		updateBraceDepth(c);
 		if(inWord == false && isIdentifyerStart(c)) {startWordDetection(index); return Optional.empty();}
 		if(inWord == true && !isIdentifyerPart(c)){
 				String word = getWord(index, file);
+				prevChar = startIndex > 0 ? file[startIndex-1]:prevChar;//TODO methode perv non blank char
 				stopWordDetection();
 				return word != null ? Optional.of(word) : Optional.empty();
 			}
-		updateParenDepth(c);
-		updateBraceDepth(c);
 		return Optional.empty();
 	}
 	
+	private void checkForIgnoredContexts(char c) {
+		if(c=='"') {
+			if(context.peek() != TypeContext.IN_STRING) {context.push(TypeContext.IN_STRING);System.out.println("PUSH: String");return;}
+			if(context.peek() == TypeContext.IN_STRING) {context.pop();System.out.println("POP: String ");return;}
+		}
+		if(c=='\'' && context.peek() != TypeContext.IN_STRING) {
+			if(context.peek() != TypeContext.IN_CHAR) {context.push(TypeContext.IN_CHAR);System.out.println("PUSH: Char");return;}
+			if(context.peek() == TypeContext.IN_CHAR) {context.pop();System.out.println("POP: Char ");return;}
+		}
+	}
+
+	private void checkForClassKeyConsistency(char c) {
+		if(preparedContext == null) {return;}
+		if(preparedContext.context() == TypeContext.IN_CLASS && c=='.') {preparedContext=null;}
+	}
+
+	private void checkForLambda(char c) {
+		if(c=='(' && followLambdaDepth) {relativeLambdaParentDepth++;}
+		if(c==')' && followLambdaDepth) {relativeLambdaParentDepth--;}
+		if(c=='\n' || c == ' ' || c == '\t' || context.peek() == TypeContext.IN_SWITCH) {return;}
+		if(((c==',' || c == ';' || c == ')') && relativeLambdaParentDepth == 0) && context.peek() == TypeContext.IN_LAMBDA_STATEMENT) {followLambdaDepth = false ;System.out.println("pop : " + context.peek()); context.pop();}
+		if(secondStepLambdaSequence && c =='{') {
+			context.push(TypeContext.IN_LAMBDA_BLOCK); 
+			System.out.println("push : " + context.peek());
+			cleanLambdaSequence();
+		}else if (secondStepLambdaSequence) {
+			context.push(TypeContext.IN_LAMBDA_STATEMENT);
+			followLambdaDepth = true;
+			relativeLambdaParentDepth = 0;
+			System.out.println("push : " + context.peek());
+			cleanLambdaSequence();
+		}
+		if(firstStepLambdaSequence && c =='>') {
+			secondStepLambdaSequence = true;
+		}else {cleanLambdaSequence();}
+		if(c=='-') {firstStepLambdaSequence = true;}
+	}
+
+	private void cleanLambdaSequence() {
+		firstStepLambdaSequence = false;
+		secondStepLambdaSequence = false;
+	}
+
 	private void updateParenDepth(char c) {
 		if(c == '(') {parenDepth++;}
 		if(c == ')') {parenDepth--;}
@@ -87,14 +171,21 @@ public class Extractor {
 	}
 	
 	private void commitContext() {
+		if(braceDepth >= 1 && preparedContext == null && context.peek() != TypeContext.IN_LAMBDA_BLOCK) {
+			context.push(TypeContext.IN_METHODE);
+			System.out.println("push : " + context.peek());
+			return;
+		}
 		if(preparedContext != null) {
 			context.push(preparedContext.context());
+			System.out.println("push : " + context.peek());
 			preparedContext = null;
 		}
 	}
 	
 	private void popContext() {
 		if (context.peek() != null) {
+			System.out.println("pop : " + context.peek());
 			context.pop();
 		}
 	}
