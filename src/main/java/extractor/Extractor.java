@@ -1,9 +1,7 @@
 package extractor;
 
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -15,19 +13,18 @@ import loader.DataContext;
 
 public class Extractor {
 	
-	private final Deque<TypeContext> context = new ArrayDeque<>();
-	private final LambdaTracker lambdaTracker = new LambdaTracker((i)->context.push(i), (i)->context.pop());
-	private final TextBlockTracker textBlockTracker = new TextBlockTracker((i)->context.push(i), (i)->context.pop());
-	private final CommentTracker commentTracker = new CommentTracker((i)->context.push(i), (i)->context.pop());
-	private final CharTracker charTracker = new CharTracker((i)->context.push(i), (i)->context.pop());
-	private final StringTracker stringTracker = new StringTracker((i)->context.push(i), (i)->context.pop());
-	private final GenericTracker genericTracker = new GenericTracker((i)->context.push(i), (i)->context.pop());
+	private final ContextController context = new ContextController();
+	private final LambdaTracker lambdaTracker = new LambdaTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final TextBlockTracker textBlockTracker = new TextBlockTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final CommentTracker commentTracker = new CommentTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final CharTracker charTracker = new CharTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final StringTracker stringTracker = new StringTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final GenericTracker genericTracker = new GenericTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final DepthTracker depthTracker = new DepthTracker();
 	private final WordTracker wordTracker = new WordTracker();
-	private PreparedContext preparedContext = null;
-	private String filename = "";
 	private boolean inDoBlock = false;
 	private boolean escape = false;
+	private String filename = "";
 	private char prevChar = ' ';
 	
 	private final EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
@@ -69,90 +66,56 @@ public class Extractor {
 		return tokens;
 	}
 
-	private void cleanContext() {
-		preparedContext=null;
-		depthTracker.clearDepthTracker();
-		if(context.peek()!=null) {System.out.println("ERROR: "+context.peek() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
-		context.clear();
+	private Optional<String> handleChar(char c, int index, char[] file){
+		TypeContext contextSnapshot = context.currentContext();
+		String result = null;
+		if(escape) {escape = false; return Optional.empty();}
+		if(c=='\\') {escape = true; return Optional.empty();}
+		
+		
+		if (!ignoredContext.contains(contextSnapshot)) {
+			int wordStart = wordTracker.processWordTracker(c, index);
+			if (wordStart != -1) {
+				result = getFromIndex(wordStart, index, file);
+			} 
+		}
+		
+		commentTracker.processCommentTracker(c, context.currentContext());
+		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_LINE) {return result == null ? Optional.empty() : Optional.of(result);}
+		
+		textBlockTracker.processTextBlockTracker(c, context.currentContext());
+		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK) {return result == null ? Optional.empty() : Optional.of(result);}
+		
+		stringTracker.processStringTracker(c, context.currentContext());
+		if(contextSnapshot == TypeContext.IN_STRING) {return result == null ? Optional.empty() : Optional.of(result);}
+		
+		charTracker.processCharTracker(c, context.currentContext());
+		if(contextSnapshot == TypeContext.IN_CHAR) {return result == null ? Optional.empty() : Optional.of(result);}
+		
+		
+		depthTracker.updateDepth(c);
+		if(c=='{') {context.pushPreparedContext();}
+		if(c=='}') {context.popIfExplicitContext();}
+		
+		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
+		if(contextSnapshot != context.currentContext()) {return result == null ? Optional.empty() : Optional.of(result);}
+		genericTracker.processGenericTracker(c, file, index, context.currentContext());
+		//checkForClassKeyConsistency(c);
+		return result == null ? Optional.empty() : Optional.of(result);
 	}
-	
+
 	private void handleWord(String word, Consumer<String> add) {
 		if("do".equals(word)) {inDoBlock = true;}
 		if("while".equals(word) && inDoBlock) {inDoBlock = false;return;}
 		if("class".equals(word) && prevChar == '.') {prevChar = ' ';return;}
-		if (JAVA_KEY_WORD.contains(word)) {prepareContext(word);return;}
+		if (JAVA_KEY_WORD.contains(word)) {context.prepareContext(word);return;}
 		add.accept(word);
 	}
-	
-	private void prepareContext(String word) {
-		switch(word) {
-		case "class" -> preparedContext = new PreparedContext(TypeContext.IN_CLASS);
-		case "record" -> preparedContext = new PreparedContext(TypeContext.IN_RECORD);
-		case "interface" -> preparedContext = new PreparedContext(TypeContext.IN_INTERFACE);
-		case "enum" -> preparedContext = new PreparedContext(TypeContext.IN_ENUM);
-		case "if" -> preparedContext = new PreparedContext(TypeContext.IN_IF);
-		case "for" -> preparedContext = new PreparedContext(TypeContext.IN_FOR);
-		case "while" -> preparedContext = new PreparedContext(TypeContext.IN_WHILE);
-		case "do" -> preparedContext = new PreparedContext(TypeContext.IN_DO);
-		case "try" -> preparedContext = new PreparedContext(TypeContext.IN_TRY);
-		case "catch" -> preparedContext = new PreparedContext(TypeContext.IN_CATCH);
-		case "switch" -> preparedContext = new PreparedContext(TypeContext.IN_SWITCH);
-		case "finaly" -> preparedContext = new PreparedContext(TypeContext.IN_FINALY);
-		case "else" -> preparedContext = new PreparedContext(TypeContext.IN_ELSE);
-		}
-	}
-	
-	private Optional<String> handleChar(char c, int index, char[] file){
-		TypeContext firstContextOfStep = context.peek();
-		if(escape) {escape = false; return Optional.empty();}
-		if(c=='\\') {escape = true; return Optional.empty();}
-		
-		commentTracker.processCommentTracker(c, context.peek());
-		if(firstContextOfStep == TypeContext.IN_COMMENT_BLOCK || context.peek() == TypeContext.IN_COMMENT_LINE) {return Optional.empty();}
-		textBlockTracker.processTextBlockTracker(c, context.peek());
-		if(firstContextOfStep == TypeContext.IN_TEXT_BLOCK) {return Optional.empty();}
-		
-		stringTracker.processStringTracker(c, context.peek());
-		if(firstContextOfStep == TypeContext.IN_STRING) {return Optional.empty();}
-		
-		charTracker.processCharTracker(c, context.peek());
-		if(firstContextOfStep == TypeContext.IN_CHAR) {return Optional.empty();}
-		
-		depthTracker.updateDepth(c);
-		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.peek());
-		genericTracker.processGenericTracker(c, file, index, context.peek());
-		checkForClassKeyConsistency(c);
-		manageContext(c);
-		int wordStart = wordTracker.processWordTracker(c, index);
-		if(wordStart != -1) {return Optional.of(getFromIndex(wordStart, index, file));}
-		return Optional.empty();
-	}
-	
-	private void manageContext(char c) {
-		if(c=='{') {commitContext();return;}
-		if(c=='}') {popContext();return;}
-	}
 
-	private void checkForClassKeyConsistency(char c) {
-		if(preparedContext == null) {return;}
-		if(preparedContext.context() == TypeContext.IN_CLASS && c=='.') {preparedContext=null;}
-	}
-	
-	private void commitContext() {
-		if(depthTracker.getBraceDepth() >= 1 && preparedContext == null && context.peek() != TypeContext.IN_LAMBDA) {
-			context.push(TypeContext.IN_METHODE);
-			return;
-		}
-		if(preparedContext != null) {
-			context.push(preparedContext.context());
-			preparedContext = null;
-		}
-	}
-	
-	private void popContext() {
-		if (context.peek() != null) {
-			context.pop();
-		}
+	private void cleanContext() {
+		depthTracker.clearDepthTracker();
+		if(context.currentContext()!=null) {System.out.println("ERROR: "+context.currentContext() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
+		context.clear();
 	}
 
 	private String getFromIndex(int startIndex, int endIndex, char[] file) {
