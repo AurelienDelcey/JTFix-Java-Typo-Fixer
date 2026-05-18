@@ -4,33 +4,37 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 import loader.DataContext;
-import shared.PipeResult;
 
 public class Extractor {
 	
 	private final Deque<TypeContext> context = new ArrayDeque<>();
+	private final LambdaTracker lambdaTracker = new LambdaTracker((i)->context.push(i), (i)->context.pop());
+	private final TextBlockTracker textBlockTracker = new TextBlockTracker((i)->context.push(i), (i)->context.pop());
+	private final CommentTracker commentTracker = new CommentTracker((i)->context.push(i), (i)->context.pop());
+	private final CharTracker charTracker = new CharTracker((i)->context.push(i), (i)->context.pop());
+	private final StringTracker stringTracker = new StringTracker((i)->context.push(i), (i)->context.pop());
+	private final GenericTracker genericTracker = new GenericTracker((i)->context.push(i), (i)->context.pop());
+	private final DepthTracker depthTracker = new DepthTracker();
+	private final WordTracker wordTracker = new WordTracker();
 	private PreparedContext preparedContext = null;
-	private boolean inWord = false;
+	private String filename = "";
 	private boolean inDoBlock = false;
 	private boolean escape = false;
-	private boolean firstStepLambdaSequence = false;
-	private boolean secondStepLambdaSequence = false;
-	private boolean followLambdaDepth = false;
-	private int startIndex = -1;
-	private int braceDepth = 0;
-	private int parenDepth = 0;
-	private int relativeLambdaParentDepth = -1;
 	private char prevChar = ' ';
+	
+	private final EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
+																	TypeContext.IN_CHAR, 
+																	TypeContext.IN_COMMENT_LINE, 
+																	TypeContext.IN_COMMENT_BLOCK,
+																	TypeContext.IN_TEXT_BLOCK);
 	
 	private final static Set<String> JAVA_KEY_WORD = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
@@ -44,6 +48,7 @@ public class Extractor {
 		pathList.keySet().stream()
 						 .forEach(i->{
 							 DataContext file = pathList.get(i);
+							 filename=i.toString();
 							 tokens.addAll(findTokens(file));
 						 });
 		return tokens;
@@ -58,17 +63,16 @@ public class Extractor {
 			Optional<String> maybeWord = handleChar(currentChar, i, file);
 			maybeWord.ifPresent((word)-> handleWord(word, (token)->tokens.add(token)));
 		}
-		if (inWord) {handleWord(getFromIndex(startIndex, file.length, file), (token)->tokens.add(token));}
+		int startIndexOfLastWord = wordTracker.endOfFileCleaning();
+		if (startIndexOfLastWord != -1) {handleWord(getFromIndex(startIndexOfLastWord, file.length, file), (token)->tokens.add(token));}
 		cleanContext();
 		return tokens;
 	}
 
 	private void cleanContext() {
 		preparedContext=null;
-		startIndex = -1;
-		inWord = false;
-		braceDepth=0;
-		parenDepth=0;
+		depthTracker.clearDepthTracker();
+		if(context.peek()!=null) {System.out.println("ERROR: "+context.peek() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
 		context.clear();
 	}
 	
@@ -99,123 +103,59 @@ public class Extractor {
 	}
 	
 	private Optional<String> handleChar(char c, int index, char[] file){
+		TypeContext firstContextOfStep = context.peek();
 		if(escape) {escape = false; return Optional.empty();}
 		if(c=='\\') {escape = true; return Optional.empty();}
-		checkForIgnoredContexts(c);
-		if(context.peek() == TypeContext.IN_CHAR || context.peek() == TypeContext.IN_STRING) {return Optional.empty();}
-		checkForLambda(c);
+		
+		commentTracker.processCommentTracker(c, context.peek());
+		if(firstContextOfStep == TypeContext.IN_COMMENT_BLOCK || context.peek() == TypeContext.IN_COMMENT_LINE) {return Optional.empty();}
+		textBlockTracker.processTextBlockTracker(c, context.peek());
+		if(firstContextOfStep == TypeContext.IN_TEXT_BLOCK) {return Optional.empty();}
+		
+		stringTracker.processStringTracker(c, context.peek());
+		if(firstContextOfStep == TypeContext.IN_STRING) {return Optional.empty();}
+		
+		charTracker.processCharTracker(c, context.peek());
+		if(firstContextOfStep == TypeContext.IN_CHAR) {return Optional.empty();}
+		
+		depthTracker.updateDepth(c);
+		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.peek());
+		genericTracker.processGenericTracker(c, file, index, context.peek());
 		checkForClassKeyConsistency(c);
-		updateParenDepth(c);
-		updateBraceDepth(c);
-		if(inWord == false && isIdentifyerStart(c)) {startWordDetection(index); return Optional.empty();}
-		if(inWord == true && !isIdentifyerPart(c)){
-				String word = getWord(index, file);
-				prevChar = startIndex > 0 ? file[startIndex-1]:prevChar;//TODO methode perv non blank char
-				stopWordDetection();
-				return word != null ? Optional.of(word) : Optional.empty();
-			}
+		manageContext(c);
+		int wordStart = wordTracker.processWordTracker(c, index);
+		if(wordStart != -1) {return Optional.of(getFromIndex(wordStart, index, file));}
 		return Optional.empty();
 	}
 	
-	private void checkForIgnoredContexts(char c) {
-		if(c=='"') {
-			if(context.peek() != TypeContext.IN_STRING) {context.push(TypeContext.IN_STRING);System.out.println("PUSH: String");return;}
-			if(context.peek() == TypeContext.IN_STRING) {context.pop();System.out.println("POP: String ");return;}
-		}
-		if(c=='\'' && context.peek() != TypeContext.IN_STRING) {
-			if(context.peek() != TypeContext.IN_CHAR) {context.push(TypeContext.IN_CHAR);System.out.println("PUSH: Char");return;}
-			if(context.peek() == TypeContext.IN_CHAR) {context.pop();System.out.println("POP: Char ");return;}
-		}
+	private void manageContext(char c) {
+		if(c=='{') {commitContext();return;}
+		if(c=='}') {popContext();return;}
 	}
 
 	private void checkForClassKeyConsistency(char c) {
 		if(preparedContext == null) {return;}
 		if(preparedContext.context() == TypeContext.IN_CLASS && c=='.') {preparedContext=null;}
 	}
-
-	private void checkForLambda(char c) {
-		if(c=='(' && followLambdaDepth) {relativeLambdaParentDepth++;}
-		if(c==')' && followLambdaDepth) {relativeLambdaParentDepth--;}
-		if(c=='\n' || c == ' ' || c == '\t' || context.peek() == TypeContext.IN_SWITCH) {return;}
-		if(((c==',' || c == ';' || c == ')') && relativeLambdaParentDepth == 0) && context.peek() == TypeContext.IN_LAMBDA_STATEMENT) {followLambdaDepth = false ;System.out.println("pop : " + context.peek()); context.pop();}
-		if(secondStepLambdaSequence && c =='{') {
-			context.push(TypeContext.IN_LAMBDA_BLOCK); 
-			System.out.println("push : " + context.peek());
-			cleanLambdaSequence();
-		}else if (secondStepLambdaSequence) {
-			context.push(TypeContext.IN_LAMBDA_STATEMENT);
-			followLambdaDepth = true;
-			relativeLambdaParentDepth = 0;
-			System.out.println("push : " + context.peek());
-			cleanLambdaSequence();
-		}
-		if(firstStepLambdaSequence && c =='>') {
-			secondStepLambdaSequence = true;
-		}else {cleanLambdaSequence();}
-		if(c=='-') {firstStepLambdaSequence = true;}
-	}
-
-	private void cleanLambdaSequence() {
-		firstStepLambdaSequence = false;
-		secondStepLambdaSequence = false;
-	}
-
-	private void updateParenDepth(char c) {
-		if(c == '(') {parenDepth++;}
-		if(c == ')') {parenDepth--;}
-	}
-	
-	private void updateBraceDepth(char c) {
-		if(c == '{') {braceDepth++; commitContext();}
-		if(c == '}') {braceDepth--; popContext();}
-	}
 	
 	private void commitContext() {
-		if(braceDepth >= 1 && preparedContext == null && context.peek() != TypeContext.IN_LAMBDA_BLOCK) {
+		if(depthTracker.getBraceDepth() >= 1 && preparedContext == null && context.peek() != TypeContext.IN_LAMBDA) {
 			context.push(TypeContext.IN_METHODE);
-			System.out.println("push : " + context.peek());
 			return;
 		}
 		if(preparedContext != null) {
 			context.push(preparedContext.context());
-			System.out.println("push : " + context.peek());
 			preparedContext = null;
 		}
 	}
 	
 	private void popContext() {
 		if (context.peek() != null) {
-			System.out.println("pop : " + context.peek());
 			context.pop();
 		}
 	}
-	
-	private String getWord(int index, char[] file) {
-		if (index-startIndex > 1) {
-			return getFromIndex(startIndex, index, file);
-		}
-		return null;
-	}
-	
-	private void startWordDetection(int index) {
-		startIndex = index;
-		inWord = true;
-	}
-	
-	private void stopWordDetection() {
-		startIndex = -1;
-		inWord = false;
-	}
 
-	private String getFromIndex(int startIndex, int i, char[] file) {
-		return String.copyValueOf(file, startIndex, i-startIndex);
-	}
-
-	private boolean isIdentifyerPart (char c) {
-		return Character.isLetterOrDigit(c) || c == '_' || c == '$';
-	}
-	
-	private boolean isIdentifyerStart (char c) {
-		return Character.isLetter(c) || c == '_' || c == '$';
+	private String getFromIndex(int startIndex, int endIndex, char[] file) {
+		return String.copyValueOf(file, startIndex, endIndex-startIndex);
 	}
 }
