@@ -39,7 +39,7 @@ public class LambdaTracker {
 	private void checkForEndContext(char c, int braceDepth, int parenDepth) {
 		if(!isTrackedContext()) {return;}
 		if(!isRelativeDepthZero(braceDepth, parenDepth)) {return;}
-		if(c == '}' || c == ')' || c == ';') {
+		if(c == '}' || c == ')' || c == ';' || c == ',') {
 			depthTracking.pop();
 			popContext.accept(null);
 		}

@@ -9,10 +9,13 @@ public class DepthTracker {
 		this.parentDepth = 0;
 	}
 	
-	public void updateDepth(char c) {
+	public void incrementDepth(char c) {
 		if(c=='(') {this.parentDepth++;}
-		if(c==')') {this.parentDepth--;}
 		if(c=='{') {this.braceDepth++;}
+		
+	}
+	public void decrementDepth(char c) {
+		if(c==')') {this.parentDepth--;}
 		if(c=='}') {this.braceDepth--;}
 	}
 	 public void clearDepthTracker() {

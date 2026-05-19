@@ -20,18 +20,23 @@ public class Extractor {
 	private final CharTracker charTracker = new CharTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final StringTracker stringTracker = new StringTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final GenericTracker genericTracker = new GenericTracker((i)->context.pushContext(i), (i)->context.popContext());
+	private final SwitchTracker switchTracker = new SwitchTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final DepthTracker depthTracker = new DepthTracker();
 	private final WordTracker wordTracker = new WordTracker();
 	private boolean inDoBlock = false;
 	private boolean escape = false;
 	private String filename = "";
-	private char prevChar = ' ';
 	
-	private final EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
+	private final static EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
 																	TypeContext.IN_CHAR, 
 																	TypeContext.IN_COMMENT_LINE, 
 																	TypeContext.IN_COMMENT_BLOCK,
 																	TypeContext.IN_TEXT_BLOCK);
+	
+	private final static EnumSet<TypeContext> rootContext = EnumSet.of(TypeContext.IN_CLASS, 
+																	TypeContext.IN_RECORD, 
+																	TypeContext.IN_INTERFACE, 
+																	TypeContext.IN_ENUM);
 	
 	private final static Set<String> JAVA_KEY_WORD = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
@@ -69,52 +74,104 @@ public class Extractor {
 	private Optional<String> handleChar(char c, int index, char[] file){
 		TypeContext contextSnapshot = context.currentContext();
 		String result = null;
+		
+		//escape sequence
 		if(escape) {escape = false; return Optional.empty();}
 		if(c=='\\') {escape = true; return Optional.empty();}
 		
-		
+		//conditional token production (An exception is made for the word "class" to avoid ghost context problems.)
 		if (!ignoredContext.contains(contextSnapshot)) {
 			int wordStart = wordTracker.processWordTracker(c, index);
 			if (wordStart != -1) {
 				result = getFromIndex(wordStart, index, file);
+				if("class".equals(result)) {
+					if(c=='.' || file[wordStart-1]=='.') {result = null;}
+				}
 			} 
 		}
 		
+		//ignored cases support (order is important)
 		commentTracker.processCommentTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_LINE) {return result == null ? Optional.empty() : Optional.of(result);}
+		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
+				contextSnapshot == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
+			return emptyOrString(result);
+		}
 		
 		textBlockTracker.processTextBlockTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK) {return result == null ? Optional.empty() : Optional.of(result);}
+		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
+			return emptyOrString(result);
+			}
 		
 		stringTracker.processStringTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_STRING) {return result == null ? Optional.empty() : Optional.of(result);}
+		if(contextSnapshot == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
+			return emptyOrString(result);
+			}
 		
 		charTracker.processCharTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_CHAR) {return result == null ? Optional.empty() : Optional.of(result);}
+		if(contextSnapshot == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
+			return emptyOrString(result);
+			}
 		
+		//update the depth first
+		depthTracker.incrementDepth(c);
 		
-		depthTracker.updateDepth(c);
-		if(c=='{') {context.pushPreparedContext();}
-		if(c=='}') {context.popIfExplicitContext();}
+		//short-circuiting specific contexts
+		if(c == '{' && context.getPreparedContext() == TypeContext.IN_SWITCH) {
+			if(switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot)) {
+				context.consumePreparedContext();
+				return emptyOrString(result);
+			}
+		}
+		if(c == '}' && contextSnapshot == TypeContext.IN_SWITCH) {
+			switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot);
+			depthTracker.decrementDepth(c);
+			return emptyOrString(result);
+		}
+		if(c == '{' && contextSnapshot == TypeContext.IN_LAMBDA) {
+			context.pushContext(TypeContext.IN_LAMBDA_BLOCK);
+			return emptyOrString(result);
+		}
+		if(c == '{' && !context.isPreparedContext() && rootContext.contains(contextSnapshot)) {
+			context.pushContext(TypeContext.IN_METHODE);
+			return emptyOrString(result);}
 		
+		//then analyze specifics contexts
 		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
-		if(contextSnapshot != context.currentContext()) {return result == null ? Optional.empty() : Optional.of(result);}
+		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrString(result);}
+		
 		genericTracker.processGenericTracker(c, file, index, context.currentContext());
-		//checkForClassKeyConsistency(c);
+		
+		//Update the context stack if a context is prepared; otherwise, fall back to IN_METHODE
+		if(c=='{') {if(!context.pushPreparedContext()) {
+			context.pushContext(TypeContext.IN_METHODE);
+		};return emptyOrString(result);}
+		if(c=='}') {if(!context.popContext()) {System.out.println("EMPTY POP" + filename);};}
+		
+		depthTracker.decrementDepth(c);
+		
+		//Implicit end-of-life binding of IN_LAMBDA_BLOCK and IN_LAMBDA
+		if(contextSnapshot == TypeContext.IN_LAMBDA_BLOCK && context.currentContext() == TypeContext.IN_LAMBDA) {
+			lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
+		}
+		
+		return emptyOrString(result);
+	}
+
+	private Optional<String> emptyOrString(String result) {
 		return result == null ? Optional.empty() : Optional.of(result);
 	}
 
 	private void handleWord(String word, Consumer<String> add) {
 		if("do".equals(word)) {inDoBlock = true;}
 		if("while".equals(word) && inDoBlock) {inDoBlock = false;return;}
-		if("class".equals(word) && prevChar == '.') {prevChar = ' ';return;}
 		if (JAVA_KEY_WORD.contains(word)) {context.prepareContext(word);return;}
 		add.accept(word);
 	}
 
 	private void cleanContext() {
 		depthTracker.clearDepthTracker();
-		if(context.currentContext()!=null) {System.out.println("ERROR: "+context.currentContext() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
+		//System.out.println("EOF" + filename);
+		//if(context.currentContext()!=null) {System.out.println("ERROR: "+context.currentContext() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
 		context.clear();
 	}
 
