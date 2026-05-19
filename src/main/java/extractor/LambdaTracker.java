@@ -4,12 +4,16 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class LambdaTracker {
 	
-	private Deque<LambdaDepth> depthTracking;
+	private static final Logger log = LoggerFactory.getLogger(LambdaTracker.class);
+	private final Deque<LambdaDepth> depthTracking;
+	private final Consumer<TypeContext> commitContext;
+	private final Consumer<TypeContext> popContext;
 	private boolean sequenceFlag;
-	private Consumer<TypeContext> commitContext;
-	private Consumer<TypeContext> popContext;
 	
 	
 	public LambdaTracker(Consumer<TypeContext> commitContext, Consumer<TypeContext> popContext) {
@@ -28,6 +32,7 @@ public class LambdaTracker {
 	private void checkForOpenContext(char c, int braceDepth, int parenDepth) {
 		if(c == '-' && !sequenceFlag) {sequenceFlag = true; return;}
 		if(sequenceFlag && c == '>') {
+			log.trace("[LAMBDA]: open lambda context for char = {}, brace = {}, parent = {}", c, braceDepth, parenDepth);
 			depthTracking.push(new LambdaDepth(braceDepth, parenDepth));
 			commitContext.accept(TypeContext.IN_LAMBDA);
 			cleanFlag();
@@ -40,6 +45,7 @@ public class LambdaTracker {
 		if(!isTrackedContext()) {return;}
 		if(!isRelativeDepthZero(braceDepth, parenDepth)) {return;}
 		if(c == '}' || c == ')' || c == ';' || c == ',') {
+			log.trace("[LAMBDA]: close lambda context for char = {}, brace = {}, parent = {}", c, braceDepth, parenDepth);
 			depthTracking.pop();
 			popContext.accept(null);
 		}

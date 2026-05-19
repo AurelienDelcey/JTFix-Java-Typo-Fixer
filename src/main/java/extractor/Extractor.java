@@ -9,10 +9,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import loader.DataContext;
 
 public class Extractor {
 	
+	private static final Logger log = LoggerFactory.getLogger(Extractor.class);
 	private final ContextController context = new ContextController();
 	private final LambdaTracker lambdaTracker = new LambdaTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final TextBlockTracker textBlockTracker = new TextBlockTracker((i)->context.pushContext(i), (i)->context.popContext());
@@ -94,22 +98,22 @@ public class Extractor {
 		commentTracker.processCommentTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
 				contextSnapshot == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
-			return emptyOrString(result);
+			return emptyOrString(result, contextSnapshot, index);
 		}
 		
 		textBlockTracker.processTextBlockTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
-			return emptyOrString(result);
+			return emptyOrString(result, contextSnapshot, index);
 			}
 		
 		stringTracker.processStringTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
-			return emptyOrString(result);
+			return emptyOrString(result, contextSnapshot, index);
 			}
 		
 		charTracker.processCharTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
-			return emptyOrString(result);
+			return emptyOrString(result, contextSnapshot, index);
 			}
 		
 		//update the depth first
@@ -119,45 +123,58 @@ public class Extractor {
 		if(c == '{' && context.getPreparedContext() == TypeContext.IN_SWITCH) {
 			if(switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot)) {
 				context.consumePreparedContext();
-				return emptyOrString(result);
+				return emptyOrString(result, contextSnapshot, index);
 			}
 		}
 		if(c == '}' && contextSnapshot == TypeContext.IN_SWITCH) {
 			switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot);
 			depthTracker.decrementDepth(c);
-			return emptyOrString(result);
+			return emptyOrString(result, contextSnapshot, index);
 		}
 		if(c == '{' && contextSnapshot == TypeContext.IN_LAMBDA) {
 			context.pushContext(TypeContext.IN_LAMBDA_BLOCK);
-			return emptyOrString(result);
+			log.trace("[PIPE]: Commit lambda block context: char = {}, index = {}, file = {}", c, index, filename);
+			return emptyOrString(result, contextSnapshot, index);
 		}
 		if(c == '{' && !context.isPreparedContext() && rootContext.contains(contextSnapshot)) {
 			context.pushContext(TypeContext.IN_METHODE);
-			return emptyOrString(result);}
+			return emptyOrString(result, contextSnapshot, index);
+		}
 		
 		//then analyze specifics contexts
 		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
-		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrString(result);}
+		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrString(result, contextSnapshot, index);}
 		
 		genericTracker.processGenericTracker(c, file, index, context.currentContext());
 		
 		//Update the context stack if a context is prepared; otherwise, fall back to IN_METHODE
-		if(c=='{') {if(!context.pushPreparedContext()) {
-			context.pushContext(TypeContext.IN_METHODE);
-		};return emptyOrString(result);}
+		if(c=='{') {
+			if(!context.pushPreparedContext()) {
+				log.trace("[PIPE]: fallback in methode context: char = {}, index = {}, file = {}", c, index, filename);
+				context.pushContext(TypeContext.IN_METHODE);
+			}
+			return emptyOrString(result, contextSnapshot, index);
+		}
 		if(c=='}') {if(!context.popContext()) {System.out.println("EMPTY POP" + filename);};}
 		
 		depthTracker.decrementDepth(c);
 		
 		//Implicit end-of-life binding of IN_LAMBDA_BLOCK and IN_LAMBDA
 		if(contextSnapshot == TypeContext.IN_LAMBDA_BLOCK && context.currentContext() == TypeContext.IN_LAMBDA) {
+			log.trace("[PIPE]: Implicit lambda block closure: char = {}, index = {}, file = {}", c, index, filename);
 			lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
 		}
 		
-		return emptyOrString(result);
+		return emptyOrString(result, contextSnapshot, index);
 	}
 
-	private Optional<String> emptyOrString(String result) {
+	private Optional<String> emptyOrString(String result, TypeContext snapshot, int index) {
+		if(snapshot != context.currentContext()) {
+			log.debug("[TRANSITON]: {} ===> {} // file: {} // index: {}", snapshot, context.currentContext(),filename, index);
+		}
+		if(result!=null) {
+			log.trace("[TOKEN]: Emit token: {} // file: {} // index: {}", result, filename, index);
+		}
 		return result == null ? Optional.empty() : Optional.of(result);
 	}
 
@@ -169,9 +186,8 @@ public class Extractor {
 	}
 
 	private void cleanContext() {
+		log.debug("[EOF] {}: Context stack state: {}, Depth State: brace: {} : paren: {}", filename, context.debugContextStack(), depthTracker.getBraceDepth(), depthTracker.getParentDepth());
 		depthTracker.clearDepthTracker();
-		//System.out.println("EOF" + filename);
-		//if(context.currentContext()!=null) {System.out.println("ERROR: "+context.currentContext() +" // "+ filename+ " //"+depthTracker.getBraceDepth());}
 		context.clear();
 	}
 
