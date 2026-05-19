@@ -25,7 +25,7 @@ public class ContextController {
 	
 	public boolean pushPreparedContext() {
 		if(!preparedContext.isEmpty()) {
-			log.debug("[CONTEXT]: Commit prepared context request: {}", preparedContext.peek());
+			log.debug("[CONTEXT]: Push prepared context request: {}", preparedContext.peek());
 			contextStack.push(preparedContext.pop().context());
 			return true;
 		}
@@ -35,7 +35,7 @@ public class ContextController {
 	public boolean pushPreparedContext(TypeContext context) {
 		if(context == null) {return false;}
 		if(!preparedContext.isEmpty() && preparedContext.peek().context() == context) {
-			log.debug("[CONTEXT]: Commit prepared context request: {}", preparedContext.peek());
+			log.debug("[CONTEXT]: Push prepared context request: {}", preparedContext.peek());
 			contextStack.push(preparedContext.pop().context());
 			return true;
 		}
@@ -102,7 +102,7 @@ public class ContextController {
 		case "try" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_TRY));}
 		case "catch" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_CATCH));}
 		case "switch" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_SWITCH));}
-		case "finaly" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_FINALLY));}
+		case "finally" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_FINALLY));}
 		case "else" ->{ logPreparation(word); preparedContext.push(new PreparedContext(TypeContext.IN_ELSE));}
 		}
 	}

@@ -116,7 +116,7 @@ public class Extractor {
 			return emptyOrString(result, contextSnapshot, index);
 			}
 		
-		//update the depth first
+		//update the depth increment first
 		depthTracker.incrementDepth(c);
 		
 		//short-circuiting specific contexts
@@ -155,7 +155,11 @@ public class Extractor {
 			}
 			return emptyOrString(result, contextSnapshot, index);
 		}
-		if(c=='}') {if(!context.popContext()) {System.out.println("EMPTY POP" + filename);};}
+		if(c=='}') {
+			if(!context.popContext()) {
+				log.debug("[PIPE]: Try to pop empty context : file = {} index = {}", filename, index);
+			}
+		}
 		
 		depthTracker.decrementDepth(c);
 		

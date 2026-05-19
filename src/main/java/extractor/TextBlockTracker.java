@@ -6,6 +6,7 @@ public class TextBlockTracker {
 	private int counter;
 	private Consumer<TypeContext> commitContext;
 	private Consumer<TypeContext> popContext;
+	
 	public TextBlockTracker(Consumer<TypeContext> commitContext, Consumer<TypeContext> popContext) {
 		this.counter = 0;
 		this.commitContext = commitContext;
