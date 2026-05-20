@@ -24,7 +24,6 @@ public class Extractor {
 	private final CharTracker charTracker = new CharTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final StringTracker stringTracker = new StringTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final GenericTracker genericTracker = new GenericTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final SwitchTracker switchTracker = new SwitchTracker((i)->context.pushContext(i), (i)->context.popContext());
 	private final DepthTracker depthTracker = new DepthTracker();
 	private final WordTracker wordTracker = new WordTracker();
 	private boolean inDoBlock = false;
@@ -127,17 +126,6 @@ public class Extractor {
 		depthTracker.incrementDepth(c);
 		
 		//short-circuiting specific contexts
-		if(c == '{' && context.getPreparedContext() == TypeContext.IN_SWITCH) {
-			if(switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot)) {
-				context.consumePreparedContext();
-				return emptyOrToken(token, contextSnapshot, index);
-			}
-		}
-		if(c == '}' && contextSnapshot == TypeContext.IN_SWITCH) {
-			switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot);
-			depthTracker.decrementDepth(c);
-			return emptyOrToken(token, contextSnapshot, index);
-		}
 		if(c == '{' && contextSnapshot == TypeContext.IN_LAMBDA) {
 			context.pushContext(TypeContext.IN_LAMBDA_BLOCK);
 			log.trace("[PIPE]: Commit lambda block context: char = {}, index = {}, file = {}", c, index, filename);
