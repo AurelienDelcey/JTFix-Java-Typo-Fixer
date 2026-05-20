@@ -49,8 +49,8 @@ public class Extractor {
 			"synchronized", "this", "throw", "throws", "transient", "try", "void", "volatile", "while", "var", "record",
 			"sealed", "permits", "non-sealed", "true", "false", "null", "Enum", "Record", "Class");
 	
-	public List<String> extract(Map<Path, DataContext>pathList) {
-		final List<String> tokens = new ArrayList<>();
+	public List<Token> extract(Map<Path, DataContext>pathList) {
+		final List<Token> tokens = new ArrayList<>();
 		pathList.keySet().stream()
 						 .forEach(i->{
 							 DataContext file = pathList.get(i);
@@ -60,24 +60,30 @@ public class Extractor {
 		return tokens;
 	}
 	
-	private List<String> findTokens(DataContext datacontext) {
-		List<String> tokens = new ArrayList<>();
+	private List<Token> findTokens(DataContext datacontext) {
+		List<Token> tokens = new ArrayList<>();
 		
 		char[] file = datacontext.fileContent();
 		for(int i=0; i<file.length; i++) {
 			char currentChar = file[i];
-			Optional<String> maybeWord = handleChar(currentChar, i, file);
+			Optional<Token> maybeWord = handleChar(currentChar, i, file);
 			maybeWord.ifPresent((word)-> handleWord(word, (token)->tokens.add(token)));
 		}
 		int startIndexOfLastWord = wordTracker.endOfFileCleaning();
-		if (startIndexOfLastWord != -1) {handleWord(getFromIndex(startIndexOfLastWord, file.length, file), (token)->tokens.add(token));}
+		if (startIndexOfLastWord != -1) {handleWord(
+											buildToken(startIndexOfLastWord,
+													file.length,
+													getFromIndex(
+															startIndexOfLastWord, 
+															file.length, file)), 
+													(token)->tokens.add(token));}
 		cleanContext();
 		return tokens;
 	}
 
-	private Optional<String> handleChar(char c, int index, char[] file){
+	private Optional<Token> handleChar(char c, int index, char[] file){
 		TypeContext contextSnapshot = context.currentContext();
-		String result = null;
+		Token token = null;
 		
 		//escape sequence
 		if(escape) {escape = false; return Optional.empty();}
@@ -87,10 +93,11 @@ public class Extractor {
 		if (!ignoredContext.contains(contextSnapshot)) {
 			int wordStart = wordTracker.processWordTracker(c, index);
 			if (wordStart != -1) {
-				result = getFromIndex(wordStart, index, file);
+				String result = getFromIndex(wordStart, index, file);
 				if("class".equals(result)) {
 					if(c=='.' || file[wordStart-1]=='.') {result = null;}
 				}
+				token = result == null ? null : buildToken(index, wordStart, result);
 			} 
 		}
 		
@@ -98,22 +105,22 @@ public class Extractor {
 		commentTracker.processCommentTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
 				contextSnapshot == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 		}
 		
 		textBlockTracker.processTextBlockTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
 		stringTracker.processStringTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
 		charTracker.processCharTracker(c, context.currentContext());
 		if(contextSnapshot == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
 		//update the depth increment first
@@ -123,27 +130,27 @@ public class Extractor {
 		if(c == '{' && context.getPreparedContext() == TypeContext.IN_SWITCH) {
 			if(switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot)) {
 				context.consumePreparedContext();
-				return emptyOrString(result, contextSnapshot, index);
+				return emptyOrToken(token, contextSnapshot, index);
 			}
 		}
 		if(c == '}' && contextSnapshot == TypeContext.IN_SWITCH) {
 			switchTracker.processSwitchTracker(c, depthTracker.getBraceDepth(), context.getPreparedContext(), contextSnapshot);
 			depthTracker.decrementDepth(c);
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 		}
 		if(c == '{' && contextSnapshot == TypeContext.IN_LAMBDA) {
 			context.pushContext(TypeContext.IN_LAMBDA_BLOCK);
 			log.trace("[PIPE]: Commit lambda block context: char = {}, index = {}, file = {}", c, index, filename);
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 		}
 		if(c == '{' && !context.isPreparedContext() && rootContext.contains(contextSnapshot)) {
 			context.pushContext(TypeContext.IN_METHODE);
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 		}
 		
 		//then analyze specifics contexts
 		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
-		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrString(result, contextSnapshot, index);}
+		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrToken(token, contextSnapshot, index);}
 		
 		genericTracker.processGenericTracker(c, file, index, context.currentContext());
 		
@@ -153,7 +160,7 @@ public class Extractor {
 				log.trace("[PIPE]: fallback in methode context: char = {}, index = {}, file = {}", c, index, filename);
 				context.pushContext(TypeContext.IN_METHODE);
 			}
-			return emptyOrString(result, contextSnapshot, index);
+			return emptyOrToken(token, contextSnapshot, index);
 		}
 		if(c=='}') {
 			if(!context.popContext()) {
@@ -169,10 +176,16 @@ public class Extractor {
 			lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
 		}
 		
-		return emptyOrString(result, contextSnapshot, index);
+		return emptyOrToken(token, contextSnapshot, index);
 	}
 
-	private Optional<String> emptyOrString(String result, TypeContext snapshot, int index) {
+	private Token buildToken(int index, int wordStart, String result) {
+		return new Token(filename, result, wordStart, 
+				index, depthTracker.getBraceDepth(), 
+				depthTracker.getParentDepth(), context.currentContext());
+	}
+
+	private Optional<Token> emptyOrToken(Token result, TypeContext snapshot, int index) {
 		if(snapshot != context.currentContext()) {
 			log.debug("[TRANSITON]: {} ===> {} // file: {} // index: {}", snapshot, context.currentContext(),filename, index);
 		}
@@ -182,11 +195,11 @@ public class Extractor {
 		return result == null ? Optional.empty() : Optional.of(result);
 	}
 
-	private void handleWord(String word, Consumer<String> add) {
-		if("do".equals(word)) {inDoBlock = true;}
-		if("while".equals(word) && inDoBlock) {inDoBlock = false;return;}
-		if (JAVA_KEY_WORD.contains(word)) {context.prepareContext(word);return;}
-		add.accept(word);
+	private void handleWord(Token token, Consumer<Token> add) {
+		if("do".equals(token.name())) {inDoBlock = true;}
+		if("while".equals(token.name()) && inDoBlock) {inDoBlock = false;return;}
+		if (JAVA_KEY_WORD.contains(token.name())) {context.prepareContext(token.name());return;}
+		add.accept(token);
 	}
 
 	private void cleanContext() {
