@@ -41,6 +41,11 @@ public class Extractor {
 																	TypeContext.IN_INTERFACE, 
 																	TypeContext.IN_ENUM);
 	
+	private static final Set<TypeContext> implicitContext = Set.of(TypeContext.IN_IF,
+																TypeContext.IN_FOR,
+																TypeContext.IN_WHILE,
+																TypeContext.IN_ELSE);
+	
 	private final static Set<String> JAVA_KEY_WORD = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
 			"float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new",
@@ -81,7 +86,7 @@ public class Extractor {
 	}
 
 	private Optional<Token> handleChar(char c, int index, char[] file){
-		TypeContext contextSnapshot = context.currentContext();
+		StateSnapshot contextSnapshot = context.getState();
 		Token token = null;
 		
 		//escape sequence
@@ -89,7 +94,7 @@ public class Extractor {
 		if(c=='\\') {escape = true; return Optional.empty();}
 		
 		//conditional token production (An exception is made for the word "class" to avoid ghost context problems.)
-		if (!ignoredContext.contains(contextSnapshot)) {
+		if (!ignoredContext.contains(contextSnapshot.getCurrentContext())) {
 			int wordStart = wordTracker.processWordTracker(c, index);
 			if (wordStart != -1) {
 				String result = getFromIndex(wordStart, index, file);
@@ -101,24 +106,28 @@ public class Extractor {
 		}
 		
 		//ignored cases support (order is important)
+		if(c==';' && contextSnapshot.getPreparedContext() != null && implicitContext.contains(contextSnapshot.getPreparedContext())){
+			context.consumePreparedContext();
+		}
+		
 		commentTracker.processCommentTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
-				contextSnapshot == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
+		if(contextSnapshot.getCurrentContext() == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
+				contextSnapshot.getCurrentContext() == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
 			return emptyOrToken(token, contextSnapshot, index);
 		}
 		
 		textBlockTracker.processTextBlockTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
+		if(contextSnapshot.getCurrentContext() == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
 			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
 		stringTracker.processStringTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
+		if(contextSnapshot.getCurrentContext() == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
 			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
 		charTracker.processCharTracker(c, context.currentContext());
-		if(contextSnapshot == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
+		if(contextSnapshot.getCurrentContext() == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
 			return emptyOrToken(token, contextSnapshot, index);
 			}
 		
@@ -126,27 +135,29 @@ public class Extractor {
 		depthTracker.incrementDepth(c);
 		
 		//short-circuiting specific contexts
-		if(c == '{' && contextSnapshot == TypeContext.IN_LAMBDA) {
+		if(c == '{' && contextSnapshot.getCurrentContext() == TypeContext.IN_LAMBDA) {
 			context.pushContext(TypeContext.IN_LAMBDA_BLOCK);
 			log.trace("[PIPE]: Commit lambda block context: char = {}, index = {}, file = {}", c, index, filename);
 			return emptyOrToken(token, contextSnapshot, index);
 		}
-		if(c == '{' && !context.isPreparedContext() && rootContext.contains(contextSnapshot)) {
+		if(c == '{' && !context.isPreparedContext() && rootContext.contains(contextSnapshot.getCurrentContext())) {
 			context.pushContext(TypeContext.IN_METHODE);
 			return emptyOrToken(token, contextSnapshot, index);
 		}
 		
 		//then analyze specifics contexts
 		lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
-		if(contextSnapshot != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrToken(token, contextSnapshot, index);}
+		if(contextSnapshot.getCurrentContext() != context.currentContext()) {depthTracker.decrementDepth(c);return emptyOrToken(token, contextSnapshot, index);}
 		
 		genericTracker.processGenericTracker(c, file, index, context.currentContext());
 		
 		//Update the context stack if a context is prepared; otherwise, fall back to IN_METHODE
 		if(c=='{') {
-			if(!context.pushPreparedContext()) {
+			if(!context.isPreparedContext()) {
 				log.trace("[PIPE]: fallback in methode context: char = {}, index = {}, file = {}", c, index, filename);
 				context.pushContext(TypeContext.IN_METHODE);
+			}else {
+				context.pushPreparedContext();
 			}
 			return emptyOrToken(token, contextSnapshot, index);
 		}
@@ -159,10 +170,10 @@ public class Extractor {
 		depthTracker.decrementDepth(c);
 		
 		//Implicit end-of-life binding of IN_LAMBDA_BLOCK and IN_LAMBDA
-		if(contextSnapshot == TypeContext.IN_LAMBDA_BLOCK && context.currentContext() == TypeContext.IN_LAMBDA) {
+		/*if(contextSnapshot.getCurrentContext() == TypeContext.IN_LAMBDA_BLOCK && context.currentContext() == TypeContext.IN_LAMBDA) {
 			log.trace("[PIPE]: Implicit lambda block closure: char = {}, index = {}, file = {}", c, index, filename);
 			lambdaTracker.processLambdaTracking(c, depthTracker.getBraceDepth(), depthTracker.getParentDepth(), context.currentContext());
-		}
+		}*/
 		
 		return emptyOrToken(token, contextSnapshot, index);
 	}
@@ -173,8 +184,8 @@ public class Extractor {
 				depthTracker.getParentDepth(), context.currentContext());
 	}
 
-	private Optional<Token> emptyOrToken(Token result, TypeContext snapshot, int index) {
-		if(snapshot != context.currentContext()) {
+	private Optional<Token> emptyOrToken(Token result, StateSnapshot snapshot, int index) {
+		if(snapshot.getCurrentContext() != context.currentContext()) {
 			log.debug("[TRANSITON]: {} ===> {} // file: {} // index: {}", snapshot, context.currentContext(),filename, index);
 		}
 		if(result!=null) {

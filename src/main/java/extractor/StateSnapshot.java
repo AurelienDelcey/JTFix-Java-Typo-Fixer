@@ -31,9 +31,13 @@ public class StateSnapshot {
 	}
 
 	private void verrifyStructuralConsistency(TypeContext preparedContext, TypeContext currentContext, int braceDepth, int parenDepth) {
-		if(braceDepth < 0 || parenDepth < 0) {throw new RuntimeException();}
-		if((braceDepth > 0 && currentContext == null)) {throw new RuntimeException();}
-		if((braceDepth == 0 && currentContext != null)) {throw new RuntimeException();}
+		if(braceDepth < 0 || parenDepth < 0) {throw new RuntimeException("nagative depth");}
+		if((braceDepth > 0 && currentContext == null)) {throw new RuntimeException("no context on depth != 0");}
+		if((braceDepth == 0 && currentContext != null) && 
+				(braceDepth == 0 && currentContext != TypeContext.IN_GENERIC) &&
+				(braceDepth == 0 && currentContext != TypeContext.IN_PARAMETERS_DECLARATION)) {
+			throw new RuntimeException("depth = 0 but context");
+			}
 	}
 	
 	public StateSnapshot commitPreparedContext() {
@@ -48,13 +52,38 @@ public class StateSnapshot {
 	
 	public StateSnapshot openContext(TypeContext context) {
 		if(context == null) {throw new RuntimeException();}
-		if(ignoredContext.contains(context)) {throw new RuntimeException();}
+		if(ignoredContext.contains(currentContext)) {throw new RuntimeException();}
 		if(context == TypeContext.IN_LAMBDA_BLOCK && currentContext != TypeContext.IN_LAMBDA)  {throw new RuntimeException();}
 		
 		if(context == TypeContext.IN_PARAMETERS) {return new StateSnapshot(preparedContext, context, braceDepth , parenDepth +1);}
 		if(context == TypeContext.IN_PARAMETERS_DECLARATION) {return new StateSnapshot(preparedContext, context, braceDepth , parenDepth +1);}
 		if(context == TypeContext.IN_BOOLEAN) {return new StateSnapshot(preparedContext, context, braceDepth , parenDepth +1);}
 		if(context == TypeContext.IN_LAMBDA_BLOCK) {return new StateSnapshot(preparedContext, context, braceDepth +1, parenDepth);}
-		return new StateSnapshot(preparedContext, context, braceDepth, parenDepth);
+		return new StateSnapshot(preparedContext, context, braceDepth +1 , parenDepth);
 	}
+
+	public int getBraceDepth() {
+		return braceDepth;
+	}
+
+	public int getParenDepth() {
+		return parenDepth;
+	}
+
+	public TypeContext getCurrentContext() {
+		return currentContext;
+	}
+
+	public TypeContext getPreparedContext() {
+		return preparedContext;
+	}
+
+	@Override
+	public String toString() {
+		
+		return "prepared context = "+preparedContext +" // current context = "+ currentContext +
+				" // brace depth = "+ braceDepth +" // paren depth = "+ parenDepth;
+	}
+	
+	
 }
