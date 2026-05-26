@@ -1,7 +1,5 @@
 package extractor;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.Set;
 
 import org.slf4j.Logger;
@@ -10,48 +8,23 @@ import org.slf4j.LoggerFactory;
 public class ContextController {
 	
 	private static final Logger log = LoggerFactory.getLogger(ContextController.class);
-	private final Deque<StateSnapshot> states = new ArrayDeque<>();
-	
-	/*private static final Set<TypeContext> explicitContext = Set.of(TypeContext.IN_CLASS,TypeContext.IN_RECORD,TypeContext.IN_INTERFACE,TypeContext.IN_ENUM,
-			TypeContext.IN_IF,TypeContext.IN_FOR,TypeContext.IN_WHILE,TypeContext.IN_DO,TypeContext.IN_TRY,TypeContext.IN_SWITCH,TypeContext.IN_CATCH,
-			TypeContext.IN_FINALLY,TypeContext.IN_ELSE);*/
+	private final StateStack states = new StateStack();
 	
 	private static final Set<TypeContext> implicitContext = Set.of(TypeContext.IN_IF,
 																	TypeContext.IN_FOR,
 																	TypeContext.IN_WHILE,
 																	TypeContext.IN_ELSE);
 	
-	public void pushContext(TypeContext context) {
-		if(context == null) {throw new RuntimeException();}
-		log.debug("[CONTEXT]: Push context request: {}", context);
+	public void openBraceContext() {
+		if(states.isEmpty()) {states.push(new StateSnapshot().openBraceContext());return;}
 		StateSnapshot state = states.peek();
-		if(state == null) { states.push(new StateSnapshot().openContext(context)); return;}
-		states.push(state.openContext(context));
+		if(state.getPreparedContext() != null) {openPreparedContext(); return;}
+		states.push(state.openBraceContext());
 	}
 	
-	public boolean pushPreparedContext() {
-		if(states.isEmpty()) {return false;}
-		log.debug("[CONTEXT]: Push prepared context request: {}", states.peek().getPreparedContext());
-		StateSnapshot state = states.pop();
-		states.push(state.commitPreparedContext());
-		return true;
-	}
-	
-	public boolean isPreparedContext() {
-		if(states.isEmpty()) {return false;}
-		return states.peek().getPreparedContext() != null;
-	}
-	
-	public boolean popContext() {
-		if(states.isEmpty()) {return false;}
-		log.debug("[CONTEXT]: Pop context request: {}", states.peek().getCurrentContext());
-		states.pop();
-		return true;
-	}
-	
-	public TypeContext getPreparedContext() {
-		if(states.isEmpty()) {return null;}
-		return states.peek().getPreparedContext();
+	public void openParenContext() {
+		if(states.isEmpty()) {states.push(new StateSnapshot().openParenContext());return;}
+		states.push(states.peek().openParenContext());
 	}
 
 	public void handleEvent(ExtractorEvent event) {
@@ -66,18 +39,8 @@ public class ContextController {
 		case OPEN_TEXT_BLOCK->{pushSpecific(TypeContext.IN_TEXT_BLOCK);}
 		case OPEN_CHAR->{pushSpecific(TypeContext.IN_CHAR);}
 		}
-		throw new RuntimeException();
 	}
-	
-	public TypeContext currentContext() {
-		if(states.isEmpty()) {return null;}
-		return states.peek().getCurrentContext();
-	}
-	
-	public StateSnapshot getState() {
-		return states.isEmpty() ? new StateSnapshot() : states.peek();
-	}
-	
+
 	public void prepareContext(String word) {
 		TypeContext newPreparedContext = switch(word) {
 		case "if" ->{ yield TypeContext.IN_IF;}
@@ -97,25 +60,92 @@ public class ContextController {
 		};
 		if (newPreparedContext == null) {return;}
 		
+		log.debug("[PREPARE] prepare context: {}", newPreparedContext);
+		
 		StateSnapshot state = states.peek();
 		state = state != null ? state : new StateSnapshot();
 		
-		if (!states.isEmpty()&& state.getPreparedContext() != null && implicitContext.contains(state.getPreparedContext())) {
+		if (shouldReplaceImplicitPreparedContext(newPreparedContext, state)) {
+			log.debug("[PREPARE] replace implicit context: {} -> {}", state, newPreparedContext);
 			states.pop();
-		}
-		logPreparation(word);
+			}
+		
 		states.push(state.prepareContext(newPreparedContext));
 	}
-	
-	private void logPreparation(String s) {
-		log.debug("[CONTEXT]: Prepare: {}", s);
+
+	private boolean shouldReplaceImplicitPreparedContext(TypeContext newPreparedContext, StateSnapshot state) {
+		return !states.isEmpty()&& state.getPreparedContext() != null && implicitContext.contains(state.getPreparedContext()) &&
+				implicitContext.contains(newPreparedContext);
+	}
+
+	public boolean closeContext() {
+		if(states.isEmpty()) {return false;}
+		StateSnapshot state = states.pop();
+		if(state.getCurrentContext() == TypeContext.IN_LAMBDA_BLOCK) {
+			if(states.peek().getCurrentContext() == TypeContext.IN_LAMBDA) {
+				log.debug("[CLOSE] collapse lambda context");
+				states.pop();
+			}
+		}
+		if(state.getCurrentContext() == TypeContext.IN_SWITCH_CASE_BLOCK) {
+			if(states.peek().getCurrentContext() == TypeContext.IN_SWITCH_CASE) {
+				log.debug("[CLOSE] collapse switch case context");
+				states.pop();
+			}
+		}
+		
+		if(states.isEmpty()) {return true;}
+		if(state.getCurrentContext() == TypeContext.IN_UNCERTAIN_PAREN) {
+			if(states.peek().getCurrentContext() == TypeContext.IN_LAMBDA) {
+				log.debug("[CLOSE] collapse lambda context");
+				states.pop();
+			}
+		}
+		if(state.getCurrentContext() == TypeContext.IN_UNCERTAIN_PAREN) {
+			if(states.peek().getCurrentContext() == TypeContext.IN_SWITCH_CASE) {
+				log.debug("[CLOSE] collapse switch case context");
+				states.pop();
+			}
+		}
+		return true;
 	}
 
 	public void clear() {
 		this.states.clear();
 	}
-	
+
+	public TypeContext currentContext() {
+		if(states.isEmpty()) {return null;}
+		return states.peek().getCurrentContext();
+	}
+
+	public StateSnapshot getState() {
+		return states.isEmpty() ? new StateSnapshot() : states.peek();
+	}
+
 	public String debugContextStack() {
-		return states.toString();
+		return states.debugView().toString();
+	}
+
+	private void pushSpecific(TypeContext context) {
+		StateSnapshot state = states.peek();
+		if(state == null) { states.push(new StateSnapshot().openSpecificContext(context)); return;}
+		states.push(state.openSpecificContext(context));
+	}
+
+	private void openPreparedContext() {
+		StateSnapshot state = states.pop();
+		TypeContext preparedContext = state.getPreparedContext();
+		log.debug("[PREPARE] commit prepared context: {}", preparedContext);
+		if(states.isEmpty()) {states.push(new StateSnapshot().openBraceSpecificContext(preparedContext));return;}
+		states.push(states.peek().openBraceSpecificContext(preparedContext));
+		return;
+	}
+
+	private void resolveArrowTransition(TypeContext current) {
+		if(current == null) {throw new RuntimeException();}
+		if(current != TypeContext.IN_SWITCH) {log.debug("[ARROW] resolve lambda transition");pushSpecific(TypeContext.IN_LAMBDA);return;}
+		log.debug("[ARROW] resolve switch transition");
+		pushSpecific(TypeContext.IN_SWITCH_CASE);
 	}
 }
