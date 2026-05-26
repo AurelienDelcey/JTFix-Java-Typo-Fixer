@@ -3,6 +3,9 @@ package extractor.state;
 import java.util.EnumSet;
 import java.util.Set;
 
+import extractor.exception.ParserStateException;
+import extractor.exception.StructuralInconsistencyException;
+
 public class StateSnapshot {
 	
 	private final TypeContext currentContext;
@@ -42,22 +45,24 @@ public class StateSnapshot {
 	}
 
 	private void verifyStructuralConsistency(TypeContext preparedContext, TypeContext currentContext, int braceDepth, int parenDepth) {
-		if(braceDepth < 0 || parenDepth < 0) {throw new RuntimeException("negative depth");}
-		if((braceDepth > 0 || parenDepth > 0) && currentContext == null) {throw new RuntimeException("no context on depth != 0");}
-		if((braceDepth == 0 && parenDepth == 0 && currentContext != null) && 
-				(braceDepth == 0 && currentContext != TypeContext.IN_GENERIC) &&
-				(braceDepth == 0 && currentContext != TypeContext.IN_PARAMETERS_DECLARATION)) {
-			throw new RuntimeException("depth = 0 but context");
-			}
+		if((braceDepth > 0 || parenDepth > 0) && currentContext == null) {
+			throw new StructuralInconsistencyException("Missing context in structural hierarchy.");
+		}
+		if(braceDepth == 0 && parenDepth == 0 && 
+				(currentContext != null && currentContext != TypeContext.IN_GENERIC)) {
+			throw new StructuralInconsistencyException("Context can not exist without structural hierarchy.");
+		}
 	}
 	
 	public StateSnapshot prepareContext(TypeContext context) {
-		if(context == null) {throw new RuntimeException();}
+		if(context == null) {throw new ParserStateException("Impossible to prepare a null context.");}
 		return new StateSnapshot(context, currentContext, braceDepth, parenDepth);
 	}
 	
 	public StateSnapshot openBraceContext() {
-		if(ignoredContext.contains(currentContext)) {throw new RuntimeException();}
+		if(ignoredContext.contains(currentContext)) {
+			throw new ParserStateException("Impossible to open new context during an ignored context.");
+		}
 		TypeContext context= null;
 		
 		
@@ -66,13 +71,23 @@ public class StateSnapshot {
 		
 		if(context == null){context = TypeContext.IN_METHOD;}
 
-		if(context == TypeContext.IN_LAMBDA_BLOCK && currentContext != TypeContext.IN_LAMBDA)  {throw new RuntimeException();}
+		if(context == TypeContext.IN_LAMBDA_BLOCK && currentContext != TypeContext.IN_LAMBDA)  {
+			throw new ParserStateException("Impossible to open LAMBDA BLOCK context outside LAMBDA.");
+		}
+		if(context == TypeContext.IN_SWITCH_CASE_BLOCK && currentContext != TypeContext.IN_SWITCH_CASE)  {
+			throw new ParserStateException("Impossible to open SWITCH CASE BLOCK context outside SWITCH CASE.");
+		}
+		if(context == TypeContext.IN_SWITCH_CASE && currentContext != TypeContext.IN_SWITCH)  {
+			throw new ParserStateException("Impossible to open SWITCH CASE context outside SWITCH.");
+		}
 		
 		return new StateSnapshot(preparedContext, context, braceDepth +1 , parenDepth);
 	}
 	
 	public StateSnapshot openParenContext() {
-		if(ignoredContext.contains(currentContext)) {throw new RuntimeException();}
+		if(ignoredContext.contains(currentContext)) {
+			throw new ParserStateException("Impossible to open new context during an ignored context.");
+		}
 		TypeContext context= null;
 		
 		if(preparedContext == null && currentContext != null && rootContext.contains(currentContext)) {context = TypeContext.IN_PARAMETERS_DECLARATION;}
@@ -85,10 +100,12 @@ public class StateSnapshot {
 	}
 
 	public StateSnapshot openSpecificContext(TypeContext context) {
+		if(context == null) {throw new ParserStateException("Impossible to open a null specific context.");}
 		return new StateSnapshot(preparedContext, context, braceDepth, parenDepth);
 	}
 
 	public StateSnapshot openBraceSpecificContext(TypeContext context) {
+		if(context == null) {throw new ParserStateException("Impossible to open a null specific context.");}
 		return new StateSnapshot(preparedContext, context, braceDepth+1, parenDepth);
 	}
 

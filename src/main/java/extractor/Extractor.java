@@ -178,6 +178,8 @@ public class Extractor {
 
 	private int findLine(int index, int[] offsets) {
 		int result = 0;
+		if(index > offsets[offsets.length-1]) {return offsets.length;}
+		
 		for(int i=0;i<offsets.length;i++) {
 			if(offsets[i]>index) {result=i;break;}
 		}

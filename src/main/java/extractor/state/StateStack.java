@@ -7,6 +7,8 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import extractor.exception.ParserStateException;
+
 public class StateStack {
 	
 	private static final Logger log = LoggerFactory.getLogger(StateStack.class);
@@ -22,6 +24,11 @@ public class StateStack {
 
 	public StateSnapshot pop() {
 		log.debug("[STACK] close context request: {}", states.peek().getCurrentContext());
+		if(states.isEmpty()) {
+		    throw new ParserStateException(
+		        "Impossible to close context from empty stack."
+		    );
+		}
 		return states.pop();
 	}
 

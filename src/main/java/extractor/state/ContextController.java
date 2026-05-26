@@ -5,6 +5,8 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import extractor.exception.StructuralInconsistencyException;
+
 public class ContextController {
 	
 	private static final Logger log = LoggerFactory.getLogger(ContextController.class);
@@ -143,7 +145,9 @@ public class ContextController {
 	}
 
 	private void resolveArrowTransition(TypeContext current) {
-		if(current == null) {throw new RuntimeException();}
+		if(current == null) {
+			throw new StructuralInconsistencyException("'->' arrow can't be resolved outside structural context.");
+		}
 		if(current != TypeContext.IN_SWITCH) {log.debug("[ARROW] resolve lambda transition");pushSpecific(TypeContext.IN_LAMBDA);return;}
 		log.debug("[ARROW] resolve switch transition");
 		pushSpecific(TypeContext.IN_SWITCH_CASE);
