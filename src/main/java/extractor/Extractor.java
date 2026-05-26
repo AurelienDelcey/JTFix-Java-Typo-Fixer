@@ -17,15 +17,14 @@ import loader.DataContext;
 public class Extractor {
 	
 	private static final Logger log = LoggerFactory.getLogger(Extractor.class);
-	private final ContextController context = new ContextController();
-	private final LambdaTracker lambdaTracker = new LambdaTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final TextBlockTracker textBlockTracker = new TextBlockTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final CommentTracker commentTracker = new CommentTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final CharTracker charTracker = new CharTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final StringTracker stringTracker = new StringTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final GenericTracker genericTracker = new GenericTracker((i)->context.pushContext(i), (i)->context.popContext());
-	private final DepthTracker depthTracker = new DepthTracker();
-	private final WordTracker wordTracker = new WordTracker();
+	private final ContextController contextController = new ContextController();
+	private final ArrowTracker arrowTracker = new ArrowTracker();
+	private final TextBlockTracker textBlockTracker = new TextBlockTracker();
+	private final CommentTracker commentTracker = new CommentTracker();
+	private final CharTracker charTracker = new CharTracker();
+	private final StringTracker stringTracker = new StringTracker();
+	private final GenericTracker genericTracker = new GenericTracker();
+	private final IdentifierTracker identifierTracker = new IdentifierTracker();
 	private boolean inDoBlock = false;
 	private boolean escape = false;
 	private String filename = "";
@@ -85,51 +84,41 @@ public class Extractor {
 		return tokens;
 	}
 
-	private Optional<Token> handleChar(char c, int index, char[] file){
-		StateSnapshot contextSnapshot = context.getState();
+	private Optional<Token> extractToken(char c, int index, char[] file) {
+		if(ignoredContext.contains(contextController.getState().getCurrentContext())) {return Optional.empty();}
 		Token token = null;
+		int wordStart = identifierTracker.trackIdentifierBoundary(c, index);
+		if (wordStart != -1) {
+			String result = getFromIndex(wordStart, index, file);
+			if("class".equals(result)) {
+				if(c=='.' || file[wordStart-1]=='.') {result = result.toUpperCase();}
+			}
+			token = buildToken(index, wordStart, result);
+			log.trace("[TOKEN] emit token: file = {}, token = {}", file, token);
+			return Optional.of(token);
+		} 
+		return Optional.empty();
+	}
+
+	private void processCharacter(char c, int index, char[] file){
+		StateSnapshot contextSnapshot = contextController.getState();
 		
 		//escape sequence
 		if(escape) {escape = false; return Optional.empty();}
 		if(c=='\\') {escape = true; return Optional.empty();}
 		
-		//conditional token production (An exception is made for the word "class" to avoid ghost context problems.)
-		if (!ignoredContext.contains(contextSnapshot.getCurrentContext())) {
-			int wordStart = wordTracker.processWordTracker(c, index);
-			if (wordStart != -1) {
-				String result = getFromIndex(wordStart, index, file);
-				if("class".equals(result)) {
-					if(c=='.' || file[wordStart-1]=='.') {result = null;}
-				}
-				token = result == null ? null : buildToken(index, wordStart, result);
-			} 
-		}
+		commentTracker.trackCommentTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
+		textBlockTracker.trackTextBlockTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
+		stringTracker.trackStringTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
+		charTracker.trackCharacter(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
 		
 		//ignored cases support (order is important)
 		if(c==';' && contextSnapshot.getPreparedContext() != null && implicitContext.contains(contextSnapshot.getPreparedContext())){
 			context.consumePreparedContext();
 		}
 		
-		commentTracker.processCommentTracker(c, context.currentContext());
-		if(contextSnapshot.getCurrentContext() == TypeContext.IN_COMMENT_BLOCK || context.currentContext() == TypeContext.IN_COMMENT_BLOCK ||
-				contextSnapshot.getCurrentContext() == TypeContext.IN_COMMENT_LINE || context.currentContext() == TypeContext.IN_COMMENT_LINE) {
-			return emptyOrToken(token, contextSnapshot, index);
-		}
-		
-		textBlockTracker.processTextBlockTracker(c, context.currentContext());
-		if(contextSnapshot.getCurrentContext() == TypeContext.IN_TEXT_BLOCK || context.currentContext() == TypeContext.IN_TEXT_BLOCK) {
-			return emptyOrToken(token, contextSnapshot, index);
-			}
-		
-		stringTracker.processStringTracker(c, context.currentContext());
-		if(contextSnapshot.getCurrentContext() == TypeContext.IN_STRING || context.currentContext() == TypeContext.IN_STRING) {
-			return emptyOrToken(token, contextSnapshot, index);
-			}
-		
-		charTracker.processCharTracker(c, context.currentContext());
-		if(contextSnapshot.getCurrentContext() == TypeContext.IN_CHAR || context.currentContext()==TypeContext.IN_CHAR) {
-			return emptyOrToken(token, contextSnapshot, index);
-			}
+		arrowTracker.trackArrowTransition(c, contextController.getState().getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
+		genericTracker.trackGenericTransition(c, file, index, contextController.currentContext()).ifPresent((i)->contextController.handleEvent(i));
 		
 		//update the depth increment first
 		depthTracker.incrementDepth(c);

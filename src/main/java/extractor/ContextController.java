@@ -53,12 +53,18 @@ public class ContextController {
 		if(states.isEmpty()) {return null;}
 		return states.peek().getPreparedContext();
 	}
-	
-	public void consumePreparedContext() {
-		if(states.isEmpty()) {throw new RuntimeException();}
-		if(implicitContext.contains(states.peek().getPreparedContext())) {
-			states.pop();
-			return;
+
+	public void handleEvent(ExtractorEvent event) {
+		TypeContext current = currentContext();
+		switch(event) {
+		case OPEN_ON_ARROW->resolveArrowTransition(current);
+		case CLOSE_CONTEXT->{closeContext();}
+		case OPEN_STRING->{pushSpecific(TypeContext.IN_STRING);}
+		case OPEN_COMMENT_LINE->{pushSpecific(TypeContext.IN_COMMENT_LINE);}
+		case OPEN_COMMENT_BLOCK->{pushSpecific(TypeContext.IN_COMMENT_BLOCK);}
+		case OPEN_GENERIC->{pushSpecific(TypeContext.IN_GENERIC);}
+		case OPEN_TEXT_BLOCK->{pushSpecific(TypeContext.IN_TEXT_BLOCK);}
+		case OPEN_CHAR->{pushSpecific(TypeContext.IN_CHAR);}
 		}
 		throw new RuntimeException();
 	}

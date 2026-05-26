@@ -1,0 +1,12 @@
+package extractor;
+
+public enum ExtractorEvent {
+	OPEN_ON_ARROW,  
+	CLOSE_CONTEXT, 
+	OPEN_STRING, 
+	OPEN_COMMENT_LINE, 
+	OPEN_COMMENT_BLOCK, 
+	OPEN_GENERIC,
+	OPEN_TEXT_BLOCK,
+	OPEN_CHAR;
+}

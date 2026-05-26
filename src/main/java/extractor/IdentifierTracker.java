@@ -1,27 +1,27 @@
 package extractor;
 
-public class WordTracker {
+public class IdentifierTracker {
 	private int startIndex;
 	
-	public WordTracker() {
+	public IdentifierTracker() {
 		this.startIndex = -1;
 	}
 	
-	public int processWordTracker(char c, int index) {
-		if(!isIdentifierPart(c) && inWord()) {
+	public int trackIdentifierBoundary(char c, int index) {
+		if(!isIdentifierPart(c) && inIdentifier()) {
 			int result = startIndex;
 			startIndex = -1;
 			return result;
 		}
-		if(isIdentifierPart(c) && inWord()) {return -1;}
-		if(isIdentifierStart(c) && !inWord()) {
+		if(isIdentifierPart(c) && inIdentifier()) {return -1;}
+		if(isIdentifierStart(c) && !inIdentifier()) {
 			this.startIndex = index;
 			return -1;
 		}
 		return -1;
 	}
 	
-	public int endOfFileCleaning() {
+	public int flushPendingIdentifier() {
 		return this.startIndex;
 	}
 	
@@ -33,7 +33,7 @@ public class WordTracker {
 		return Character.isLetter(c) || c == '_' || c == '$';
 	}
 	
-	private boolean inWord() {
+	private boolean inIdentifier() {
 		return this.startIndex > -1;
 	}
 }

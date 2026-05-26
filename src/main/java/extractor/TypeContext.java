@@ -2,7 +2,7 @@ package extractor;
 
 public enum TypeContext {
 IN_CLASS,
-IN_METHODE,
+IN_METHOD,
 IN_ENUM,
 IN_RECORD,
 IN_STRING,

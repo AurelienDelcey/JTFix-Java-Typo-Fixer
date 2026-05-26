@@ -1,35 +1,43 @@
 package extractor;
 
-import java.util.function.Consumer;
+import java.util.EnumSet;
+import java.util.Optional;
+import java.util.Set;
 
 public class TextBlockTracker {
 	private int counter;
-	private Consumer<TypeContext> commitContext;
-	private Consumer<TypeContext> popContext;
 	
-	public TextBlockTracker(Consumer<TypeContext> commitContext, Consumer<TypeContext> popContext) {
+	private final static Set<TypeContext> ignored = EnumSet.of(TypeContext.IN_CHAR, 
+															TypeContext.IN_COMMENT_LINE, 
+															TypeContext.IN_COMMENT_BLOCK);
+	
+	public TextBlockTracker() {
 		this.counter = 0;
-		this.commitContext = commitContext;
-		this.popContext = popContext;
 	}
 	
-	public void processTextBlockTracker(char c, TypeContext currentContext) {
-		if(c =='"') {counter++;} else {counter = 0;}
-		if(isOpenTextBlockSymbol(currentContext)) {
-			counter = 0;
-			commitContext.accept(TypeContext.IN_TEXT_BLOCK);
+	public Optional<ExtractorEvent> trackTextBlockTransition(char c, TypeContext currentContext) {
+		if(ignored.contains(currentContext)) {resetCounter();return Optional.empty();}
+		if(c =='"') {counter++;} else {resetCounter();return Optional.empty();}
+		if(isTextBlockOpening(currentContext)) {
+			resetCounter();
+			return Optional.of(ExtractorEvent.OPEN_TEXT_BLOCK);
 		}
-		if(isClosureTextBlockSymbol(currentContext)) {
-			counter = 0;
-			popContext.accept(TypeContext.IN_TEXT_BLOCK);
+		if(isTextBlockClosing(currentContext)) {
+			resetCounter();
+			return Optional.of(ExtractorEvent.CLOSE_CONTEXT);
 		}
+		return Optional.empty();
 	}
 
-	private boolean isClosureTextBlockSymbol(TypeContext currentContext) {
+	private void resetCounter() {
+		counter = 0;
+	}
+
+	private boolean isTextBlockClosing(TypeContext currentContext) {
 		return counter==3 && (currentContext == TypeContext.IN_TEXT_BLOCK);
 	}
 
-	private boolean isOpenTextBlockSymbol(TypeContext currentContext) {
+	private boolean isTextBlockOpening(TypeContext currentContext) {
 		return counter==3 && (currentContext != TypeContext.IN_TEXT_BLOCK);
 	}
 }
