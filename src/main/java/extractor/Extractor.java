@@ -12,6 +12,16 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import extractor.state.ContextController;
+import extractor.state.StateSnapshot;
+import extractor.state.TypeContext;
+import extractor.tracker.ArrowTracker;
+import extractor.tracker.CharTracker;
+import extractor.tracker.CommentTracker;
+import extractor.tracker.GenericTracker;
+import extractor.tracker.IdentifierTracker;
+import extractor.tracker.StringTracker;
+import extractor.tracker.TextBlockTracker;
 import loader.DataContext;
 
 public class Extractor {

@@ -1,4 +1,4 @@
-package extractor;
+package extractor.tracker;
 
 public class IdentifierTracker {
 	private int startIndex;

@@ -1,4 +1,4 @@
-package extractor;
+package extractor.state;
 
 import java.util.EnumSet;
 import java.util.Set;

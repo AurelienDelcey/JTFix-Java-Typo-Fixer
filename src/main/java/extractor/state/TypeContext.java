@@ -1,4 +1,4 @@
-package extractor;
+package extractor.state;
 
 public enum TypeContext {
 IN_CLASS,

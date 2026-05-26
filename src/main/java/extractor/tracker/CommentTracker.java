@@ -1,4 +1,4 @@
-package extractor;
+package extractor.tracker;
 
 import java.util.EnumSet;
 import java.util.Optional;
@@ -6,6 +6,9 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import extractor.state.ExtractorEvent;
+import extractor.state.TypeContext;
 
 public class CommentTracker {
 	
