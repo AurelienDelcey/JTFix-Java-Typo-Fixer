@@ -23,12 +23,12 @@ public class StateStack {
 	}
 
 	public StateSnapshot pop() {
-		log.debug("[STACK] close context request: {}", states.peek().getCurrentContext());
 		if(states.isEmpty()) {
 		    throw new ParserStateException(
 		        "Impossible to close context from empty stack."
 		    );
 		}
+		log.debug("[STACK] close context request: {}", states.peek().getCurrentContext());
 		return states.pop();
 	}
 

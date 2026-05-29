@@ -2,6 +2,7 @@ package extractor;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -187,10 +188,9 @@ public class SingleFileExtractor {
 		int result = 0;
 		if(index > offsets[offsets.length-1]) {return offsets.length;}
 		
-		for(int i=0;i<offsets.length;i++) {
-			if(offsets[i]>index) {result=i;break;}
-		}
-		return result;
+		result = Arrays.binarySearch(offsets, index);
+		
+		return result < 0 ? -(result)-1:result;
 	}
 
 	private void finalizeFileParsing() {
