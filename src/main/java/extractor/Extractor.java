@@ -2,99 +2,30 @@ package extractor;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import extractor.state.ContextController;
-import extractor.state.StateSnapshot;
-import extractor.state.TypeContext;
-import extractor.tracker.ArrowTracker;
-import extractor.tracker.CharTracker;
-import extractor.tracker.CommentTracker;
-import extractor.tracker.GenericTracker;
-import extractor.tracker.IdentifierTracker;
-import extractor.tracker.StringTracker;
-import extractor.tracker.TextBlockTracker;
+import extractor.exception.ParserException;
 import loader.DataContext;
+import shared.Failure;
+import shared.PipeResult;
+import shared.Success;
 
 public class Extractor {
 	
-	private static final Logger log = LoggerFactory.getLogger(Extractor.class);
-	private final ContextController contextController = new ContextController();
-	private final ArrowTracker arrowTracker = new ArrowTracker();
-	private final TextBlockTracker textBlockTracker = new TextBlockTracker();
-	private final CommentTracker commentTracker = new CommentTracker();
-	private final CharTracker charTracker = new CharTracker();
-	private final StringTracker stringTracker = new StringTracker();
-	private final GenericTracker genericTracker = new GenericTracker();
-	private final IdentifierTracker identifierTracker = new IdentifierTracker();
-	private final Set<String> knowTypes = new HashSet<>();
-	private final Set<String> knowEnums = new HashSet<>();
-	private boolean inDoBlock = false;
-	private boolean escape = false;
-	private String filename = "";
-	private int[] offsets = null;
-	
-	private final static EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
-																		TypeContext.IN_CHAR, 
-																		TypeContext.IN_COMMENT_LINE, 
-																		TypeContext.IN_COMMENT_BLOCK,
-																		TypeContext.IN_TEXT_BLOCK);
-	
-	private static final Set<TypeContext> closableWithoutBraceContext = Set.of(TypeContext.IN_IF,
-																			TypeContext.IN_FOR,
-																			TypeContext.IN_WHILE,
-																			TypeContext.IN_ELSE);
-	
-	private final static EnumSet<TypeContext> rootContext = EnumSet.of(TypeContext.IN_CLASS, 
-																	TypeContext.IN_RECORD, 
-																	TypeContext.IN_INTERFACE, 
-																	TypeContext.IN_ENUM);
-	
-	private final static Set<String> JAVA_KEY_WORDS = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
-			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
-			"float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new",
-			"package", "private", "protected", "public", "return", "short", "static", "strictfp", "super", "switch",
-			"synchronized", "this", "throw", "throws", "transient", "try", "void", "volatile", "while", "var", "record",
-			"sealed", "permits", "non-sealed", "true", "false", "null", "Enum", "Record", "Class");
-	
-	public List<Token> extract(Map<Path, DataContext>pathList) {
-		final List<Token> tokens = new ArrayList<>();
-		pathList.keySet().stream()
-						 .forEach(i->{
-							 DataContext file = pathList.get(i);
-							 filename=i.getFileName().toString();
-							 tokens.addAll(tokenize(file));
-						 });
-		return tokens;
-	}
-	
-	private List<Token> tokenize(DataContext datacontext) {
-		List<Token> tokens = new ArrayList<>();
-		char[] file = datacontext.fileContent();
-		offsets = datacontext.linesOffsets();
-		
-		for(int i=0; i<file.length; i++) {
-			char currentChar = file[i];
-			Optional<Token> maybeToken = extractToken(currentChar, i, file);
-			maybeToken.ifPresent((word)-> handleWord(word, file, (token)->tokens.add(token)));
-			processCharacter(currentChar, i, file);
+	public static PipeResult<ExtractorPayload> extract(Map<Path,DataContext> mapData){
+		List<FileExtraction> extractionResult = null;
+		try {
+			extractionResult = mapData.keySet().stream()
+											   .map((i)->extractOne(mapData, i))
+											   .toList();
+		} catch (ParserException e) {
+			return new Failure<>(e.getMessage());
 		}
-		
-		int startIndexOfLastWord = identifierTracker.flushPendingIdentifier();
-		if (startIndexOfLastWord != -1) {handleEofWord(tokens, file, startIndexOfLastWord);}
-		
-		finalizeFileParsing();
-		return tokens;
+		return new Success<>(mergeResult(extractionResult));
 	}
 
 	private Optional<Token> extractToken(char c, int index, char[] file) {
@@ -186,38 +117,24 @@ public class Extractor {
 		}
 	}
 
-	private boolean hasStateTransitioned(StateSnapshot contextSnapshot) {
-		return !contextSnapshot.equals(contextController.getState());
+	private static FileExtraction extractOne(Map<Path, DataContext> mapData, Path path) {
+		SingleFileExtractor extractorAgent = new SingleFileExtractor();
+		 DataContext file = mapData.get(path);
+		 return extractorAgent.tokenizeFile(path, file);
 	}
-
-	private Token buildToken(int index, int wordStart, String result) {
-		return new Token(filename, result, wordStart, 
-				index, contextController.getState());
-	}
-
-	private int findLine(int index, int[] offsets) {
-		int result = 0;
-		if(index > offsets[offsets.length-1]) {return offsets.length;}
+	
+	private static ExtractorPayload mergeResult( List<FileExtraction> extractionResult ) {
+		Set<String> types = new HashSet<>();
+		Set<String> enums = new HashSet<>();
 		
-		for(int i=0;i<offsets.length;i++) {
-			if(offsets[i]>index) {result=i;break;}
-		}
-		return result;
+		for (FileExtraction rawResult : extractionResult) {
+            types.addAll(rawResult.knownTypes());
+            enums.addAll(rawResult.knownEnums());
+        }
+		Map<Path, TokenizedFile> tokenMap = extractionResult.stream()
+																.map(i->i.tokens())
+																.collect(Collectors.toMap(i->i.path(), i->i));
+		return new ExtractorPayload(tokenMap, types, enums);
 	}
 
-	private void finalizeFileParsing() {
-		log.debug("[EOF] {}: Context stack state = {}, Depth: brace = {} / paren = {}", filename, contextController.debugContextStack(), contextController.getState().getBraceDepth(), contextController.getState().getParenDepth());
-		contextController.clear();
-	}
-
-	private String getFromIndex(int startIndex, int endIndex, char[] file) {
-		return String.copyValueOf(file, startIndex, endIndex-startIndex);
-	}
-
-	private boolean isIgnoredContext(StateSnapshot contextSnapshot) {
-		return contextController.getState().getCurrentContext() != null && 
-				ignoredContext.contains(contextController.getState().getCurrentContext()) ||
-				contextSnapshot.getCurrentContext() != null && 
-				ignoredContext.contains(contextSnapshot.getCurrentContext());
-	}
 }
