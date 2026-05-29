@@ -1,4 +1,4 @@
-package extractor;
+package extractor.valueObject;
 
 import extractor.state.StateSnapshot;
 

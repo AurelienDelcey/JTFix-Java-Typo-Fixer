@@ -23,6 +23,9 @@ import extractor.tracker.GenericTracker;
 import extractor.tracker.IdentifierTracker;
 import extractor.tracker.StringTracker;
 import extractor.tracker.TextBlockTracker;
+import extractor.valueObject.FileExtraction;
+import extractor.valueObject.Token;
+import extractor.valueObject.TokenizedFile;
 import loader.DataContext;
 
 public class SingleFileExtractor {

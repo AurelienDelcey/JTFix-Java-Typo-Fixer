@@ -13,6 +13,9 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import extractor.exception.ParserException;
+import extractor.valueObject.ExtractorPayload;
+import extractor.valueObject.FileExtraction;
+import extractor.valueObject.TokenizedFile;
 import loader.DataContext;
 import shared.Failure;
 import shared.PipeResult;

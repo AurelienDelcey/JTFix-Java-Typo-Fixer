@@ -1,4 +1,4 @@
-package extractor;
+package extractor.valueObject;
 
 import java.nio.file.Path;
 import java.util.List;
