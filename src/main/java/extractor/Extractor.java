@@ -3,6 +3,8 @@ package extractor;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,21 +37,28 @@ public class Extractor {
 	private final StringTracker stringTracker = new StringTracker();
 	private final GenericTracker genericTracker = new GenericTracker();
 	private final IdentifierTracker identifierTracker = new IdentifierTracker();
+	private final Set<String> knowTypes = new HashSet<>();
+	private final Set<String> knowEnums = new HashSet<>();
 	private boolean inDoBlock = false;
 	private boolean escape = false;
 	private String filename = "";
 	private int[] offsets = null;
 	
 	private final static EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
-																	TypeContext.IN_CHAR, 
-																	TypeContext.IN_COMMENT_LINE, 
-																	TypeContext.IN_COMMENT_BLOCK,
-																	TypeContext.IN_TEXT_BLOCK);
+																		TypeContext.IN_CHAR, 
+																		TypeContext.IN_COMMENT_LINE, 
+																		TypeContext.IN_COMMENT_BLOCK,
+																		TypeContext.IN_TEXT_BLOCK);
 	
 	private static final Set<TypeContext> closableWithoutBraceContext = Set.of(TypeContext.IN_IF,
-																TypeContext.IN_FOR,
-																TypeContext.IN_WHILE,
-																TypeContext.IN_ELSE);
+																			TypeContext.IN_FOR,
+																			TypeContext.IN_WHILE,
+																			TypeContext.IN_ELSE);
+	
+	private final static EnumSet<TypeContext> rootContext = EnumSet.of(TypeContext.IN_CLASS, 
+																	TypeContext.IN_RECORD, 
+																	TypeContext.IN_INTERFACE, 
+																	TypeContext.IN_ENUM);
 	
 	private final static Set<String> JAVA_KEY_WORDS = Set.of("abstract", "assert", "boolean", "break", "byte", "case", "catch",
 			"char", "class", "const", "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally",
@@ -131,6 +140,12 @@ public class Extractor {
 		if("do".equals(token.name())) {inDoBlock = true;}
 		if("while".equals(token.name()) && inDoBlock) {inDoBlock = false;return;}
 		if (JAVA_KEY_WORDS.contains(token.name())) {contextController.prepareContext(token.name());return;}
+		if (!JAVA_KEY_WORDS.contains(token.name()) && rootContext.contains(contextController.getState().getPreparedContext())) {
+			if(contextController.getState().getPreparedContext()==TypeContext.IN_ENUM) {
+				knowEnums.add(token.name());
+			}
+			knowTypes.add(token.name());
+		}
 		add.accept(token);
 	}
 
