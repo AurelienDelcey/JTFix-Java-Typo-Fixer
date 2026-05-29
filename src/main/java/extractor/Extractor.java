@@ -6,7 +6,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 
 import extractor.exception.ParserException;
 import loader.DataContext;
@@ -27,94 +31,36 @@ public class Extractor {
 		}
 		return new Success<>(mergeResult(extractionResult));
 	}
-
-	private Optional<Token> extractToken(char c, int index, char[] file) {
-		if(ignoredContext.contains(contextController.getState().getCurrentContext())) {return Optional.empty();}
-		Token token = null;
-		int wordStart = identifierTracker.trackIdentifierBoundary(c, index);
-		if (wordStart != -1) {
-			String result = getFromIndex(wordStart, index, file);
-			token = buildToken(index, wordStart, result);
-			log.trace("[TOKEN] emit token: file = {}, token = {}", file, token);
-			return Optional.of(token);
-		} 
-		return Optional.empty();
-	}
-
-	private void processCharacter(char c, int index, char[] file){
-		StateSnapshot contextSnapshot = contextController.getState();
+	
+	public static PipeResult<ExtractorPayload> extractParallel(Map<Path,DataContext> mapData){
+		int workers = Runtime.getRuntime().availableProcessors();
+		ExecutorService exec = Executors.newFixedThreadPool(workers);
 		
-		if(escape) {escape = false; return;}
-		if(c=='\\') {escape = true; return;}
+		List<Future<FileExtraction>> resultList = new ArrayList<>();
+		List<FileExtraction> extractionResult = new ArrayList<>();
 		
-		commentTracker.trackCommentTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
-		textBlockTracker.trackTextBlockTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
-		stringTracker.trackStringTransition(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
-		charTracker.trackCharacter(c, contextSnapshot.getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
-		
-		if(isIgnoredContext(contextSnapshot)){logTransition(index, contextSnapshot);return;}
-		
-		arrowTracker.trackArrowTransition(c, contextController.getState().getCurrentContext()).ifPresent((i)->contextController.handleEvent(i));
-		genericTracker.trackGenericTransition(c, file, index, contextController.currentContext()).ifPresent((i)->contextController.handleEvent(i));
-		
-		closeBraceLessContexts(c, contextSnapshot);
-		applyStructuralTransition(c, index);
-		
-		logTransition(index, contextSnapshot);
-		return;
-	}
-
-	private void handleWord(Token token, char[] file, Consumer<Token> add) {
-		if("class".equals(token.name())) {
-			if((token.endIndex()<file.length && file[token.endIndex()]=='.') || 
-					(token.startIndex() > 0 && file[token.startIndex()-1]=='.')) {
-				return;
-				}
+		for(Path path : mapData.keySet()) {
+			Future<FileExtraction> extractedFile = exec.submit(() -> extractOne(mapData, path));
+			resultList.add(extractedFile);
 		}
-		if("do".equals(token.name())) {inDoBlock = true;}
-		if("while".equals(token.name()) && inDoBlock) {inDoBlock = false;return;}
-		if (JAVA_KEY_WORDS.contains(token.name())) {contextController.prepareContext(token.name());return;}
-		if (!JAVA_KEY_WORDS.contains(token.name()) && rootContext.contains(contextController.getState().getPreparedContext())) {
-			if(contextController.getState().getPreparedContext()==TypeContext.IN_ENUM) {
-				knowEnums.add(token.name());
-			}
-			knowTypes.add(token.name());
-		}
-		add.accept(token);
-	}
-
-	private void handleEofWord(List<Token> tokens, char[] file, int startIndexOfLastWord) {
-		handleWord(buildToken(startIndexOfLastWord,
-							file.length,getFromIndex(startIndexOfLastWord, 
-													file.length, 
-													file)),
-							file,
-							(token)->tokens.add(token));
-	}
-
-	private void logTransition(int index, StateSnapshot contextSnapshot) {
-		if(hasStateTransitioned(contextSnapshot)) {
-			log.debug("[TRANSITION]: {} ===> {} // file: {} // index: {} // line :{}", contextSnapshot, contextController.getState().getCurrentContext(),filename, index, findLine(index,offsets));
-		}
-	}
-
-	private void closeBraceLessContexts(char c, StateSnapshot contextSnapshot) {
-		if(contextController.getState().getPreparedContext() == TypeContext.IN_FOR) {return;}
-		if(c==';' && contextController.getState().getPreparedContext() != null && closableWithoutBraceContext.contains(contextController.getState().getPreparedContext())){
-			contextController.closeContext();
-		}
-	}
-
-	private void applyStructuralTransition(char c, int index) {
-		if(c=='{') {
-			contextController.openBraceContext();
-		}else if (c=='('){
-			contextController.openParenContext();
-		}else if(c=='}' || c==')') {
-			if(!contextController.closeContext()) {
-				log.debug("[CONTEXT]: Try to pop empty context : file = {} index = {}", filename, index);
+		
+		exec.shutdown();
+		for(Future<FileExtraction> i : resultList) {
+			try {
+				FileExtraction tmp = i.get();
+				extractionResult.add(tmp);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return new Failure<>("extractor failed: " + e.getMessage());
+			} catch (ExecutionException e) {
+				Throwable cause = e.getCause();
+                if (cause instanceof ParserException) {
+                    return new Failure<>("extractor failed: " + cause.getMessage());
+                }
+				return new Failure<>("extractor failed: " + e.getMessage());
 			}
 		}
+		return new Success<>(mergeResult(extractionResult));
 	}
 
 	private static FileExtraction extractOne(Map<Path, DataContext> mapData, Path path) {
