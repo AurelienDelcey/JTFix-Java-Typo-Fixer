@@ -86,7 +86,7 @@ public class Extractor {
 		for(int i=0; i<file.length; i++) {
 			char currentChar = file[i];
 			Optional<Token> maybeToken = extractToken(currentChar, i, file);
-			maybeToken.ifPresent((word)-> handleWord(word, (token)->tokens.add(token)));
+			maybeToken.ifPresent((word)-> handleWord(word, file, (token)->tokens.add(token)));
 			processCharacter(currentChar, i, file);
 		}
 		
@@ -103,9 +103,6 @@ public class Extractor {
 		int wordStart = identifierTracker.trackIdentifierBoundary(c, index);
 		if (wordStart != -1) {
 			String result = getFromIndex(wordStart, index, file);
-			if("class".equals(result)) {
-				if(c=='.' || file[wordStart-1]=='.') {result = result.toUpperCase();}
-			}
 			token = buildToken(index, wordStart, result);
 			log.trace("[TOKEN] emit token: file = {}, token = {}", file, token);
 			return Optional.of(token);
@@ -136,7 +133,13 @@ public class Extractor {
 		return;
 	}
 
-	private void handleWord(Token token, Consumer<Token> add) {
+	private void handleWord(Token token, char[] file, Consumer<Token> add) {
+		if("class".equals(token.name())) {
+			if((token.endIndex()<file.length && file[token.endIndex()]=='.') || 
+					(token.startIndex() > 0 && file[token.startIndex()-1]=='.')) {
+				return;
+				}
+		}
 		if("do".equals(token.name())) {inDoBlock = true;}
 		if("while".equals(token.name()) && inDoBlock) {inDoBlock = false;return;}
 		if (JAVA_KEY_WORDS.contains(token.name())) {contextController.prepareContext(token.name());return;}
@@ -153,7 +156,8 @@ public class Extractor {
 		handleWord(buildToken(startIndexOfLastWord,
 							file.length,getFromIndex(startIndexOfLastWord, 
 													file.length, 
-													file)), 
+													file)),
+							file,
 							(token)->tokens.add(token));
 	}
 
