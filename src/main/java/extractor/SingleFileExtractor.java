@@ -29,6 +29,13 @@ import extractor.valueObject.Token;
 import extractor.valueObject.TokenizedFile;
 import loader.DataContext;
 
+/**
+ * Character-by-character extraction engine for a single Java source file.
+ *
+ * Produces contextualized tokens and accumulates structural knowledge
+ * required by higher-level analysis stages.
+ */
+
 public class SingleFileExtractor {
 	
 	private static final Logger log = LoggerFactory.getLogger(SingleFileExtractor.class);
@@ -198,7 +205,8 @@ public class SingleFileExtractor {
 		
 		return result < 0 ? -(result)-1:result;
 	}
-
+	
+	// EOF invariant: no context may remain open.
 	private void finalizeFileParsing() {
 		log.debug("[EOF] {}: Context stack state = {}, Depth: brace = {} / paren = {}", filename, contextController.debugContextStack(), contextController.getState().getBraceDepth(), contextController.getState().getParenDepth());
 		if(!contextController.isEmptyStack()) {

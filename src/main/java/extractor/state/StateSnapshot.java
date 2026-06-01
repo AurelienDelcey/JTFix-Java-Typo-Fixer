@@ -6,10 +6,20 @@ import java.util.Set;
 import extractor.exception.ParserStateException;
 import extractor.exception.StructuralInconsistencyException;
 
+/**
+*Immutable parser state snapshot.
+*
+*Captures the active structural context,
+*pending context transitions, and structural depths.
+*/
 public class StateSnapshot {
 	
 	private final TypeContext currentContext;
+	
+	// Context prepared by a declarative keyword and waiting
+	// for structural materialization.
 	private final TypeContext preparedContext;
+	
 	private final int braceDepth;
 	private final int parenDepth;
 	

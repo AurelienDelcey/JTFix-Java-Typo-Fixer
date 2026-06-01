@@ -7,11 +7,18 @@ import org.slf4j.LoggerFactory;
 
 import extractor.exception.StructuralInconsistencyException;
 
+/**
+ * Centralized context lifecycle manager.
+ *
+ * Maintains structural context transitions and parser invariants
+ * throughout extraction.
+ */
 public class ContextController {
 	
 	private static final Logger log = LoggerFactory.getLogger(ContextController.class);
 	private final StateStack states = new StateStack();
 	
+	// Contexts that may legally exist without brace-delimited blocks.
 	private static final Set<TypeContext> implicitContext = Set.of(TypeContext.IN_IF,
 																	TypeContext.IN_FOR,
 																	TypeContext.IN_WHILE,
