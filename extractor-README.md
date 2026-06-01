@@ -77,32 +77,36 @@ structural units in order to support future parallel traversal strategies.
 
 The extractor is not intended to become a full Java compiler frontend.
 
-Its purpose is to provide deterministic structural extraction
-and contextualized token ownership for higher-level analysis pipelines.
+Its purpose is to provide deterministic structural extraction and contextualized token ownership for higher-level analysis pipelines.
 
 The engine intentionally avoids responsibilities such as:
-- full AST generation
-- semantic resolution
-- type inference
-- bytecode analysis
-- compilation validation
 
-The extractor focuses exclusively on structural interpretation
-required for contextual identifier analysis and naming classification.
+* full AST generation
+* semantic resolution
+* type inference
+* bytecode analysis
+* compilation validation
+
+The extractor focuses exclusively on structural interpretation required for contextual identifier analysis and naming classification.
 
 Structural certainty is preferred over exhaustive language modeling.
 
 The extractor intentionally avoids relying on existing parsing solutions.
 
-The engine is designed specifically around the structural requirements
-of contextual identifier analysis and naming classification,
-while preserving the lightweight execution model expected from a CLI tool.
+While mature parser frameworks already exist, they are designed to solve a much broader problem space than the one required by JTFix.
+
+The extractor focuses exclusively on deterministic structural extraction and contextual identifier ownership. Using a general-purpose parsing framework would introduce additional abstraction layers, memory overhead, and processing costs that are unnecessary for the needs of a lightweight CLI analysis tool.
+
+The engine is therefore designed specifically around the structural requirements of contextual identifier analysis and naming classification while preserving predictable performance characteristics and low execution overhead.
 
 This allows the extraction pipeline to remain:
-- structurally specialized
-- incrementally composable
-- predictable in behavior
-- and free from unnecessary abstraction overhead
+
+* structurally specialized
+* incrementally composable
+* predictable in behavior
+* lightweight enough for large-scale repository traversal
+* and free from unnecessary abstraction overhead
+
 
 ---
 
@@ -250,52 +254,32 @@ They now form the backbone of the extraction model.
 
 ### End-of-File Invariants
 
-- At end-of-file, braceDepth must equal zero.
-
-- At end-of-file, parenDepth must equal zero.
-
 - At end-of-file, no context must still exist.
+
+- A non-empty context stack at end-of-file indicates a structural inconsistency and must abort extraction.
 
 ---
 
 ## Current Limitations
 
-The extractor is still under active development
-and some structural behaviors remain intentionally unsupported or unvalidated.
+The extractor is still under active development and some structural behaviors remain intentionally unsupported or partially validated.
 
-Known limitations and partially validated behaviors currently include:
+Known limitations currently include:
 
 - Annotations are not yet structurally analyzed.
 
-- Nested type declarations are not fully validated yet.
-  The current model may support them correctly,
-  but large-scale validation is still incomplete.
-
-- Generic expressions may still produce false positives
-  inside boolean expression contexts in cases such as:
+- Generic expressions may still produce false positives in ambiguous cases where generic declarations and boolean expressions share similar syntax, such as:
   `a < b > c`
 
-- Internal switch expression structures are not fully analyzed yet,
-  although structural traversal support already exists.
+- Escaped escape sequences are not fully supported yet.
+  Certain combinations of escaped delimiters may still produce incorrect contextual transitions inside string or character literals.
 
-- Parenthesis-driven contextual structures are not implemented yet.
+- Nested type declarations are not fully validated yet.
+  The current model may already support them correctly, but large-scale validation remains incomplete.
 
-  The extractor currently tracks parenthesis depth only.
+- Internal switch expression structures are not fully analyzed yet, although structural traversal support already exists.
 
-  Dedicated contextual interpretation for:
-  - declarative parameter zones
-  - executable parameter zones
-  - control structure expressions
-  - record parameter declarations
-
-  is still under architectural exploration.
-
-  The current model may eventually:
-  - introduce dedicated parenthesis-driven contexts
-  - or derive structural meaning directly from relative depths
-
-- Some advanced contextual interpretations are intentionally deferred
-  to higher-level classification layers.
+Some advanced contextual interpretations are intentionally deferred to higher-level classification layers.
 
 The extraction engine is continuously refined through:
 - structural debugging
