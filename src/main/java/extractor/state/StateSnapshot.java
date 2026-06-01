@@ -10,8 +10,8 @@ public class StateSnapshot {
 	
 	private final TypeContext currentContext;
 	private final TypeContext preparedContext;
-	private int braceDepth;
-	private int parenDepth;
+	private final int braceDepth;
+	private final int parenDepth;
 	
 	private final static EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
 																		TypeContext.IN_CHAR, 

@@ -83,6 +83,8 @@ public class ContextController {
 	public boolean closeContext() {
 		if(states.isEmpty()) {return false;}
 		StateSnapshot state = states.pop();
+		if(states.isEmpty()) {return true;}
+		
 		if(state.getCurrentContext() == TypeContext.IN_LAMBDA_BLOCK) {
 			if(states.peek().getCurrentContext() == TypeContext.IN_LAMBDA) {
 				log.debug("[CLOSE] collapse lambda context");
@@ -95,8 +97,6 @@ public class ContextController {
 				states.pop();
 			}
 		}
-		
-		if(states.isEmpty()) {return true;}
 		if(state.getCurrentContext() == TypeContext.IN_UNCERTAIN_PAREN) {
 			if(states.peek().getCurrentContext() == TypeContext.IN_LAMBDA) {
 				log.debug("[CLOSE] collapse lambda context");
