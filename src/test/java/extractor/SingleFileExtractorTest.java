@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import extractor.exception.StructuralInconsistencyException;
 import extractor.state.TypeContext;
 import extractor.valueObject.FileExtraction;
 import loader.DataContext;
@@ -22,7 +23,9 @@ import static extractor.state.TypeContext.*;
 
 class SingleFileExtractorTest {
 	
-	private final static Path TEST_PATH = Path.of("src/test/resources/filesTest/singleFileExtractorTest.java");
+	private final static Path TEST_PATH = Path.of("src/test/resources/filesTest/singleFileExtractor");
+	private final static Path VALID_PATH = Path.of("src/test/resources/filesTest/singleFileExtractor/singleFileExtractorTest.java");
+	private final static Path WRONG_PATH = Path.of("src/test/resources/filesTest/singleFileExtractor/missingClosingBrace.java");
 	private SingleFileExtractor extractor;
 	private static Map<Path, DataContext> mapTest;
 	
@@ -94,12 +97,12 @@ class SingleFileExtractorTest {
 	
 	@Test
 	void singleFileExtractor_ShouldNotThrowException_WhenTokenizeFile() {
-		extractor.tokenizeFile(TEST_PATH, mapTest.get(TEST_PATH));
+		extractor.tokenizeFile(VALID_PATH, mapTest.get(VALID_PATH));
 	}
 	
 	@Test
 	void singleFileExtractor_ShouldExtractCorrectToken_WhenTokenizeFile() {
-		FileExtraction result = extractor.tokenizeFile(TEST_PATH, mapTest.get(TEST_PATH));
+		FileExtraction result = extractor.tokenizeFile(VALID_PATH, mapTest.get(VALID_PATH));
 		List<String>tokenNameList =result.tokens().tokenList().stream()
 									.map(i->i.name())
 									.toList();
@@ -108,11 +111,17 @@ class SingleFileExtractorTest {
 	
 	@Test
 	void singleFileExtractor_ShouldExtractCorrectContext_WhenTokenizeFile() {
-		FileExtraction result = extractor.tokenizeFile(TEST_PATH, mapTest.get(TEST_PATH));
+		FileExtraction result = extractor.tokenizeFile(VALID_PATH, mapTest.get(VALID_PATH));
 		List<TypeContext>tokencontextList =result.tokens().tokenList().stream()
 									.map(i->i.context().getCurrentContext())
 									.toList();
 		assertIterableEquals(expectedContext, tokencontextList, "La liste des context ne correspond pas");
+	}
+	
+	@Test
+	void parser_ShouldThrowStructuralInconsistencyException_WhenContextRemainOpenAtEOF() {
+		assertThrows(StructuralInconsistencyException.class,
+				()->extractor.tokenizeFile(WRONG_PATH, mapTest.get(WRONG_PATH)));
 	}
 
 }

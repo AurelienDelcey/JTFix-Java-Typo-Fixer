@@ -128,6 +128,10 @@ public class ContextController {
 	public String debugContextStack() {
 		return states.debugView().toString();
 	}
+	
+	public boolean isEmptyStack() {
+		return states.isEmpty();
+	}
 
 	private void pushSpecific(TypeContext context) {
 		StateSnapshot state = states.peek();

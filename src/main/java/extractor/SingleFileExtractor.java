@@ -13,6 +13,7 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import extractor.exception.StructuralInconsistencyException;
 import extractor.state.ContextController;
 import extractor.state.StateSnapshot;
 import extractor.state.TypeContext;
@@ -190,6 +191,7 @@ public class SingleFileExtractor {
 
 	private int findLine(int index, int[] offsets) {
 		int result = 0;
+		if(offsets.length==0) {return result;}
 		if(index > offsets[offsets.length-1]) {return offsets.length;}
 		
 		result = Arrays.binarySearch(offsets, index);
@@ -199,6 +201,10 @@ public class SingleFileExtractor {
 
 	private void finalizeFileParsing() {
 		log.debug("[EOF] {}: Context stack state = {}, Depth: brace = {} / paren = {}", filename, contextController.debugContextStack(), contextController.getState().getBraceDepth(), contextController.getState().getParenDepth());
+		if(!contextController.isEmptyStack()) {
+			throw new StructuralInconsistencyException( "EOF reached with unclosed contexts in file '%s': %s"
+			        .formatted(filename, contextController.debugContextStack()));
+		}
 		contextController.clear();
 	}
 
