@@ -1,0 +1,420 @@
+package infrastructure.repository;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import application.query.QueryContext;
+import application.repository.AnomalyRepository;
+import domain.anomaly.Anomaly;
+import domain.exception.IllegalTraceErasureTentative;
+import domain.exception.InconsistentAnomalyStateException;
+import domain.traceability.EventTrace;
+import domain.traceability.Traceability;
+import domain.valueobject.BusinessId;
+import domain.valueobject.CorrectiveAction;
+import domain.valueobject.Description;
+import domain.valueobject.Evidence;
+import domain.valueobject.ImpactedQuantity;
+import domain.valueobject.ProductionOrder;
+import domain.valueobject.ProlongationContext;
+import infrastructure.exception.AnomalyNotFoundException;
+import infrastructure.exception.BusinessIdColisionException;
+import infrastructure.exception.TechnicalException;
+import static infrastructure.repository.AnomalyRepositoryMapper.mapAnomaly;
+
+public class JdbcAnomalyRepository implements AnomalyRepository{
+	
+	private static final Logger log = LoggerFactory.getLogger(JdbcAnomalyRepository.class);
+	private final ConnectionConfig config;
+	private final String tableName;
+	private final String INSERT_STATEMENT ;
+	private final String UPDATE_STATEMENT ;
+	private static final int MYSQL_DUPLICATE_KEY = 1062;
+
+	public JdbcAnomalyRepository(ConnectionConfig config, String tableName) {
+		this.config = config;
+		this.tableName = tableName;
+		this.INSERT_STATEMENT = """
+			INSERT INTO %s(
+				id,
+				parent_id,
+				child_id,
+				anomaly_state,
+				description,
+				corrective_action_id,
+				quality_decision,
+				proving_document_id,
+				created_by,
+				created_at,
+				corrected_by,
+				corrected_at,
+				resolved_by,
+				resolved_at,
+				archived_by,
+				archived_at,
+				sector,
+				prolongation_comment,
+				year,
+				sequence,
+				impacted_quantity,
+				production_order,
+				machine,
+				created_name,
+				corrected_name,
+				resolved_name,
+				archived_name
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+			""".formatted(tableName);
+		this.UPDATE_STATEMENT = """
+				UPDATE %s
+				SET parent_id = ?,
+					child_id = ?,
+					anomaly_state = ?,
+					description = ?,
+					corrective_action_id = ?,
+					quality_decision = ?,
+					proving_document_id = ?,
+					created_by = ?,
+					created_at = ?,
+					corrected_by = ?,
+					corrected_at = ?,
+					resolved_by = ?,
+					resolved_at = ?,
+					archived_by = ?,
+					archived_at = ?,
+					sector = ?,
+					prolongation_comment = ?,
+					year = ?,
+					sequence = ?,
+					impacted_quantity = ?,
+					production_order = ?,
+					machine = ?,
+					created_name = ?,
+					corrected_name = ?,
+					resolved_name = ?,
+					archived_name = ?
+				WHERE id = ?;
+				""".formatted(tableName);
+	}
+
+	@Override
+	public void save(Anomaly anomaly) {
+		if(anomaly==null) {
+			throw new IllegalArgumentException("Anomaly should exist.");
+		}
+		log.debug("save requested - anomalyId={}", anomaly.getId());
+		try(Connection connection = openConnection()){
+			if(existsById(anomaly, connection)) {
+				try(PreparedStatement preparedStatement = prepareUpdateStatement(connection, anomaly)){
+					if(preparedStatement.executeUpdate() != 1) {
+						throw new TechnicalException("Persistence error: update fail.");
+					}
+					log.debug("update success 1 row affected - anomalyId={}", anomaly.getId());
+				}
+			}else {
+				try(PreparedStatement preparedStatement = prepareInsertStatement(connection, anomaly)){
+					if(preparedStatement.executeUpdate() != 1) {
+						throw new TechnicalException("Persistence error: insertion fail.");
+					}
+					log.debug("save success 1 row affected - anomalyId={}", anomaly.getId());
+				}
+			}
+		}catch (SQLException e) {
+			if (e.getErrorCode() == MYSQL_DUPLICATE_KEY) {
+			        throw new BusinessIdColisionException();
+			    }
+			log.warn("technical SQL exception when saving anomaly - anomalyId={}", anomaly.getId());
+			throw new TechnicalException("Persistence error.",e);
+		}
+	}
+
+	@Override
+	public void saveAtomic(Anomaly anomaly1, Anomaly anomaly2) {
+		if(anomaly1 == null || anomaly2 == null) {
+			throw new IllegalArgumentException("Anomalies should exist.");
+		}
+		log.debug("saveAtomic requested - parentAnomalyId={}, childAnomalyId={}", anomaly1.getId(), anomaly2.getId());
+		try(Connection connection = openConnection()){
+			if (!existsById(anomaly1, connection) || existsById(anomaly2, connection)) {
+				log.warn("saveAtomic fail parent anomaly does not exist or child anomaly already exist - parentAnomalyId={}, childAnomalyId={}", anomaly1.getId(), anomaly2.getId());
+			    throw new TechnicalException();
+			}
+			connection.setAutoCommit(false);
+			try(PreparedStatement preparedUpdateStatement = prepareUpdateStatement(connection, anomaly1);
+					PreparedStatement preparedInsertStatement = prepareInsertStatement(connection, anomaly2)){
+				int resultUpdate = preparedUpdateStatement.executeUpdate();
+				log.debug("saveAtomic parent anomaly update success - parentAnomalyId={}", anomaly1.getId());
+				int resultInsert = preparedInsertStatement.executeUpdate();
+				log.debug("saveAtomic child anomaly insert success - childAnomalyId={}", anomaly2.getId());
+					if(resultInsert != 1 || resultUpdate != 1) {
+						connection.rollback();
+						connection.setAutoCommit(true);
+						log.warn("saveAtomic fail - row affected={}, parentAnomalyId={}, childAnomalyId={}", resultInsert+resultUpdate, anomaly1.getId(), anomaly2.getId());
+						throw new TechnicalException("Persistence error: transaction fail.");
+					}
+				}catch(Exception e) {
+					connection.rollback();
+					connection.setAutoCommit(true);
+					log.warn("saveAtomic fail for technical exception - parentAnomalyId={}, childAnomalyId={}", anomaly1.getId(), anomaly2.getId());
+					throw e;
+				}
+				connection.commit();
+				connection.setAutoCommit(true);
+				log.debug("saveAtomic success - parentAnomalyId={}, childAnomalyId={}", anomaly1.getId(), anomaly2.getId());
+		}catch (SQLException e) {
+			log.warn("saveAtomic fail for technical SQL exception - parentAnomalyId={}, childAnomalyId={}", anomaly1.getId(), anomaly2.getId());
+			throw new TechnicalException("Persistence error.",e);
+		}
+	}
+
+	@Override
+	public Anomaly findById(UUID id) throws AnomalyNotFoundException, InconsistentAnomalyStateException {
+		log.debug("findByID requested - anomalyId={}", id);
+		try(Connection connection = openConnection()){
+			try(PreparedStatement preparedStatement = connection.prepareStatement("""
+					SELECT * FROM %s
+					WHERE id = ?
+					""".formatted(tableName))){
+				preparedStatement.setString(1, id.toString());
+				try(ResultSet result = preparedStatement.executeQuery()){
+					if(!result.next()) {
+						throw new AnomalyNotFoundException();
+					}
+					Anomaly anomaly = mapAnomaly(result);
+					log.debug("findByID request success - anomalyId={}", id);
+					return anomaly;
+				}
+			}
+		} catch (SQLException | IllegalTraceErasureTentative e) {
+			log.warn("findById failure for SQL technical exception- anomalyId={}", id);
+			throw new TechnicalException("impossible to reconstruct anomaly", e);
+		}
+	}
+
+	@Override
+	public List<Anomaly> findByContext(QueryContext context) {
+		log.debug("findByContext requested - page={}", context.page());
+		try(Connection connection = openConnection()){
+			try(PreparedStatement preparedStatement = connection.prepareStatement("""
+					SELECT * FROM %s
+					%s
+					ORDER BY %s DESC
+					LIMIT 51
+					OFFSET ?
+					""".formatted(tableName, applyArchivedStateFilter(context.includeArchived()), 
+							context.sortingSelection().getFormatForQueries()))){
+				preparedStatement.setInt(1, 50*(context.page()-1));
+				try(ResultSet result = preparedStatement.executeQuery()){
+					List<Anomaly> anomalies = new ArrayList<>();
+					while(result.next()) {
+						anomalies.add(mapAnomaly(result));
+					}
+					log.debug("findByContext success - page={}", context.page());
+					return anomalies;
+				}
+			}
+		} catch (SQLException | IllegalTraceErasureTentative e) {
+			log.warn("findByContext failure for SQL technical exception- page={}", context.page());
+			throw new TechnicalException("impossible to reconstruct anomaly", e);
+		}
+	}
+	
+	private String applyArchivedStateFilter(boolean includeArchived) {
+		if(includeArchived) {
+			return "";
+		}
+		return "WHERE anomaly_state != 'ARCHIVED'";
+	}
+
+	private Connection openConnection() throws SQLException {
+		Connection connection = DriverManager.getConnection(config.url(), config.user(), config.password());
+		return connection;
+	}
+	
+	private PreparedStatement prepareInsertStatement(Connection connection, Anomaly anomaly) throws SQLException {
+		PreparedStatement query = connection.prepareStatement(INSERT_STATEMENT);
+		Traceability traceability = anomaly.getTraceability();
+		ProlongationContext prolongationContext = anomaly.getProlongationContext();
+		BusinessId businessId = anomaly.getBusinessId();
+		UUID childId = anomaly.getChildId();
+		Description description = anomaly.getDescription();
+		CorrectiveAction correctiveAction = anomaly.getCorrectiveAction();
+		ImpactedQuantity quantity = anomaly.getQuantity();
+		ProductionOrder order = anomaly.getProductionOrder();
+		Evidence evidence = anomaly.getEvidence();
+		EventTrace created = traceability.getCreation();
+		EventTrace corrected = traceability.getToCorrected();
+		EventTrace resolved = traceability.getToResolved();
+		EventTrace archived = traceability.getToArchived();
+		
+		query.setString(1, anomaly.getId().toString());
+		query.setString(2, prolongationContext == null ? null:prolongationContext.parentId().toString());
+		query.setString(3, stringOrNullFromUuid(childId));
+		query.setString(4, anomaly.getAnomalyState().name());
+		query.setString(5, description.description());
+		query.setString(6, correctiveAction == null ? null:correctiveAction.documentId());
+		query.setString(7, anomaly.getQualityDecision().name());
+		query.setString(8, evidence == null ? null:evidence.documentId());
+		query.setString(9, idOrNullFromEventTrace(created));
+		query.setTimestamp(10, timestampOrNullFromEventTrace(created));
+		query.setString(11, idOrNullFromEventTrace(corrected));
+		query.setTimestamp(12, timestampOrNullFromEventTrace(corrected));
+		query.setString(13, idOrNullFromEventTrace(resolved));
+		query.setTimestamp(14, timestampOrNullFromEventTrace(resolved));
+		query.setString(15, idOrNullFromEventTrace(archived));
+		query.setTimestamp(16, timestampOrNullFromEventTrace(archived));
+		query.setString(17, anomaly.getSector().name());
+		query.setString(18, prolongationContext == null ? null:prolongationContext.prolongationComment());
+		if (businessId != null) {
+		    query.setInt(19, businessId.year());
+		} else {
+		    query.setNull(19, Types.INTEGER);
+		}
+		if (businessId != null) {
+		    query.setInt(20, businessId.sequence());
+		} else {
+		    query.setNull(20, Types.INTEGER);
+		}
+		if (quantity != null) {
+		    query.setInt(21, quantity.quantity());
+		} else {
+		    query.setNull(21, Types.INTEGER);
+		}
+		if (order != null) {
+		    query.setInt(22, order.productionOrder());
+		} else {
+		    query.setNull(22, Types.INTEGER);
+		}
+		query.setString(23, anomaly.getMachine().name());
+		query.setString(24, nameOrNullFromEventTrace(created));
+		query.setString(25, nameOrNullFromEventTrace(corrected));
+		query.setString(26, nameOrNullFromEventTrace(resolved));
+		query.setString(27, nameOrNullFromEventTrace(archived));
+		return query;
+	}
+	
+	private PreparedStatement prepareUpdateStatement(Connection connection, Anomaly anomaly) throws SQLException {
+		PreparedStatement query = connection.prepareStatement(UPDATE_STATEMENT);
+		Traceability traceability = anomaly.getTraceability();
+		ProlongationContext prolongationContext = anomaly.getProlongationContext();
+		BusinessId businessId = anomaly.getBusinessId();
+		UUID childId = anomaly.getChildId();
+		Description description = anomaly.getDescription();
+		CorrectiveAction correctiveAction = anomaly.getCorrectiveAction();
+		ImpactedQuantity quantity = anomaly.getQuantity();
+		ProductionOrder order = anomaly.getProductionOrder();
+		Evidence evidence = anomaly.getEvidence();
+		EventTrace created = traceability.getCreation();
+		EventTrace corrected = traceability.getToCorrected();
+		EventTrace resolved = traceability.getToResolved();
+		EventTrace archived = traceability.getToArchived();
+		
+		query.setString(1, prolongationContext == null ? null:prolongationContext.parentId().toString());
+		query.setString(2, stringOrNullFromUuid(childId));
+		query.setString(3, anomaly.getAnomalyState().name());
+		query.setString(4, description.description());
+		query.setString(5, correctiveAction == null ? null:correctiveAction.documentId());
+		query.setString(6, anomaly.getQualityDecision().name());
+		query.setString(7, evidence == null ? null:evidence.documentId());
+		query.setString(8, idOrNullFromEventTrace(created));
+		query.setTimestamp(9, timestampOrNullFromEventTrace(created));
+		query.setString(10, idOrNullFromEventTrace(corrected));
+		query.setTimestamp(11, timestampOrNullFromEventTrace(corrected));
+		query.setString(12, idOrNullFromEventTrace(resolved));
+		query.setTimestamp(13, timestampOrNullFromEventTrace(resolved));
+		query.setString(14, idOrNullFromEventTrace(archived));
+		query.setTimestamp(15, timestampOrNullFromEventTrace(archived));
+		query.setString(16, anomaly.getSector().name());
+		query.setString(17, prolongationContext == null ? null:prolongationContext.prolongationComment());
+		if (businessId != null) {
+		    query.setInt(18, businessId.year());
+		} else {
+		    query.setNull(18, Types.INTEGER);
+		}
+		if (businessId != null) {
+		    query.setInt(19, businessId.sequence());
+		} else {
+		    query.setNull(19, Types.INTEGER);
+		}
+		if (quantity != null) {
+		    query.setInt(20, quantity.quantity());
+		} else {
+		    query.setNull(20, Types.INTEGER);
+		}
+		if (order != null) {
+		    query.setInt(21, order.productionOrder());
+		} else {
+		    query.setNull(21, Types.INTEGER);
+		}
+		query.setString(22, anomaly.getMachine().name());
+		query.setString(23, nameOrNullFromEventTrace(created));
+		query.setString(24, nameOrNullFromEventTrace(corrected));
+		query.setString(25, nameOrNullFromEventTrace(resolved));
+		query.setString(26, nameOrNullFromEventTrace(archived));
+		query.setString(27, anomaly.getId().toString());
+
+		return query;
+	}
+	
+	@Override
+	public int getMaxSequenceByYear(int year) {
+		int maxSequence = 0;
+		try(Connection connection = openConnection()){
+			try(PreparedStatement preparedStatement = connection.prepareStatement("""
+					SELECT MAX(sequence) 
+					FROM %s
+					WHERE year = ?
+					""".formatted(tableName))){
+				preparedStatement.setInt(1, year);
+				try(ResultSet result = preparedStatement.executeQuery()){
+					if (result.next()) {
+						maxSequence = result.getInt(1);
+					}
+				}
+			}
+		} catch (SQLException e) {
+			throw new TechnicalException("impossible to reconstruct anomaly", e);
+		}
+		return maxSequence;
+	}
+
+	
+
+	private boolean existsById(Anomaly anomaly, Connection connection) throws SQLException{
+		try(PreparedStatement preparedStatement = connection.prepareStatement("""
+						SELECT id FROM %s
+						WHERE id = ?
+						""".formatted(tableName))){
+			preparedStatement.setString(1, anomaly.getId().toString());
+			try (ResultSet result = preparedStatement.executeQuery()) {
+			        return result.next();
+			}
+		}
+	}
+	
+	private String stringOrNullFromUuid(UUID id) {
+		return id == null ? null : id.toString();
+	}
+	
+	private String idOrNullFromEventTrace(EventTrace trace) {
+		return trace == null ? null : trace.actorId();
+	}
+	
+	private String nameOrNullFromEventTrace(EventTrace trace) {
+		return trace == null ? null : trace.name();
+	}
+	
+	private Timestamp timestampOrNullFromEventTrace(EventTrace trace) {
+		return trace == null ? null : Timestamp.from(trace.instant());
+	}
+}

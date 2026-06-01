@@ -1,0 +1,27 @@
+.app-root {
+    -fx-background: #DAFFEF;
+    -fx-background-insets: 0;
+	-fx-background-radius: 8;
+	-fx-border-radius: 8;
+}
+
+.border-pane{
+	-fx-background: #DAFFEF;
+	-fx-background-radius: 8;
+	-fx-border-radius: 8;
+}
+
+.button{
+	-fx-background-color: #5F7681;
+	-fx-background-radius: 6;
+	-fx-text-fill: white;
+}
+
+.button:hover{
+	-fx-background-color: #68818D;
+	-fx-cursor: hand;
+}
+
+.button:pressed{
+	-fx-background-color: #576C75;
+}
