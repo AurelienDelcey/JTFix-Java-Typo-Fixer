@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.Optional;
 
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import extractor.state.ExtractorEvent;
@@ -12,55 +12,36 @@ import extractor.state.TypeContext;
 
 class ArrowTrackerTest {
 	
-	private static ArrowTracker arrowTracker;
+	private ArrowTracker arrowTracker;
 	private final static TypeContext IGNORE = TypeContext.IN_COMMENT_LINE;
 	private final static TypeContext VALID = TypeContext.IN_METHOD;
 	private final static char[] OPEN_TWICE = "->->".toCharArray();
 	private final static char[] CUT_ARROW_SQUENCE = "- > -.> -/> -a> -1> -!> -}> -)> -(>".toCharArray();
 	private final static char[] CHAOS_SEQUENCE_OPEN_SIX_ARROW = "---><-><<<>>>-<>//...6-<->--<<<<<-<->>->>6<>--><->-<".toCharArray();
 	
-	@BeforeAll
-	static void setup() {
+	@BeforeEach
+	void setup() {
 		arrowTracker = new ArrowTracker();
 	}
 
 	@Test
 	void arrowTracker_ShouldOpenTwiceArrowContex_WhenTwiceArrowDetected() {
-		int counter = 0;
-		
-		for(int i = 0; i < OPEN_TWICE.length; i++) {
-			Optional<ExtractorEvent> result = arrowTracker.trackArrowTransition(OPEN_TWICE[i], VALID);
-			if (result.isPresent()) {
-				if(result.get() == ExtractorEvent.OPEN_ON_ARROW) {
-					counter++;
-				}
-			}
-		}
-		assertTrue(counter == 2);
+		int counter = runCharArray(OPEN_TWICE, VALID);
+		assertEquals(2, counter);
 	}
-	
+
 	@Test
 	void arrowTracker_ShouldNotOpenArrowContex_WhenArrowSequenceIsCut() {
 		for(int i = 0; i < CUT_ARROW_SQUENCE.length; i++) {
 			Optional<ExtractorEvent> result = arrowTracker.trackArrowTransition(CUT_ARROW_SQUENCE[i], VALID);
-			if (result.isPresent()) {
-				fail("an inextistent arrow sequence was detected.");
-			}
+			assertTrue(result.isEmpty());
 		}
 	}
 	
 	@Test
 	void arrowTracker_ShouldNotOpenArrowContex_WhenContextIsIgnored() {
-		int counter = 0;
-		for(int i = 0; i < OPEN_TWICE.length; i++) {
-			Optional<ExtractorEvent> result = arrowTracker.trackArrowTransition(OPEN_TWICE[i], IGNORE);
-			if (result.isPresent()) {
-				if(result.get() == ExtractorEvent.OPEN_ON_ARROW) {
-					counter++;
-				}
-			}
-		}
-		assertTrue(counter == 0);
+		int counter = runCharArray(OPEN_TWICE, IGNORE);
+		assertEquals(0, counter);
 	}
 	
 	@Test
@@ -77,21 +58,25 @@ class ArrowTrackerTest {
 				}
 			}
 		}
-		assertTrue(counter == 1);
+		assertEquals(1, counter);
 	}
 	
 	@Test
 	void arrowTracker_ShouldOpenSixArrowContex() {
+		int counter = runCharArray(CHAOS_SEQUENCE_OPEN_SIX_ARROW, VALID);
+		assertEquals(6, counter);
+	}
+
+	private int runCharArray(char[] charArray, TypeContext context) {
 		int counter = 0;
-		
-		for(int i = 0; i < CHAOS_SEQUENCE_OPEN_SIX_ARROW.length; i++) {
-			Optional<ExtractorEvent> result = arrowTracker.trackArrowTransition(CHAOS_SEQUENCE_OPEN_SIX_ARROW[i], VALID);
+		for(int i = 0; i < charArray.length; i++) {
+			Optional<ExtractorEvent> result = arrowTracker.trackArrowTransition(charArray[i], context);
 			if (result.isPresent()) {
 				if(result.get() == ExtractorEvent.OPEN_ON_ARROW) {
 					counter++;
 				}
 			}
 		}
-		assertTrue(counter == 6);
+		return counter;
 	}
 }
