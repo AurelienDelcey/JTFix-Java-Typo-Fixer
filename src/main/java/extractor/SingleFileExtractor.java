@@ -67,7 +67,7 @@ public class SingleFileExtractor {
 			"float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native", "new",
 			"package", "private", "protected", "public", "return", "short", "static", "strictfp", "super", "switch",
 			"synchronized", "this", "throw", "throws", "transient", "try", "void", "volatile", "while", "var", "record",
-			"sealed", "permits", "non-sealed", "true", "false", "null");
+			"sealed", "permits", "non-sealed", "true", "false", "null", "yield");
 	
 	FileExtraction tokenizeFile(Path path, DataContext datacontext) {
 		List<Token> tokens = new ArrayList<>();
@@ -161,7 +161,8 @@ public class SingleFileExtractor {
 
 	private void closeBraceLessContexts(char c, StateSnapshot contextSnapshot) {
 		if(contextController.getState().getPreparedContext() == TypeContext.IN_FOR) {return;}
-		if(c==';' && contextController.getState().getPreparedContext() != null && closableWithoutBraceContext.contains(contextController.getState().getPreparedContext())){
+		if(c==';' && ((contextController.getState().getPreparedContext() != null && closableWithoutBraceContext.contains(contextController.getState().getPreparedContext()))||
+				(contextController.getState().getCurrentContext() != null && contextController.getState().getCurrentContext() == TypeContext.IN_SWITCH_CASE))){
 			contextController.closeContext();
 		}
 	}

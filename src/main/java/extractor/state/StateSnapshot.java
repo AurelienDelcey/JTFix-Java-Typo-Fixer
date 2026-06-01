@@ -22,7 +22,8 @@ public class StateSnapshot {
 	private static final Set<TypeContext> controlStructureContext = Set.of(TypeContext.IN_IF,
 																		TypeContext.IN_FOR,
 																		TypeContext.IN_WHILE,
-																		TypeContext.IN_ELSE);
+																		TypeContext.IN_ELSE,
+																		TypeContext.IN_SWITCH);
 	
 	private final static EnumSet<TypeContext> rootContext = EnumSet.of(TypeContext.IN_CLASS, 
 																		TypeContext.IN_RECORD, 
