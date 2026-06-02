@@ -1,0 +1,160 @@
+package extractor.state;
+
+import java.util.EnumSet;
+import java.util.Set;
+
+import extractor.exception.ParserStateException;
+import extractor.exception.StructuralInconsistencyException;
+
+/**
+* Immutable parser state snapshot.
+* 
+* Captures the active structural context,
+* pending context transitions, and structural depths.
+*/
+public class StateSnapshot {
+	
+	private final TypeContext currentContext;
+	
+	// Context prepared by a declarative keyword and waiting
+	// for structural materialization.
+	private final TypeContext preparedContext;
+	
+	private final int braceDepth;
+	private final int parenDepth;
+	
+	private final static EnumSet<TypeContext> ignoredContext = EnumSet.of(TypeContext.IN_STRING, 
+																		TypeContext.IN_CHAR, 
+																		TypeContext.IN_COMMENT_LINE, 
+																		TypeContext.IN_COMMENT_BLOCK,
+																		TypeContext.IN_TEXT_BLOCK);
+	
+	private static final Set<TypeContext> controlStructureContext = Set.of(TypeContext.IN_IF,
+																		TypeContext.IN_FOR,
+																		TypeContext.IN_WHILE,
+																		TypeContext.IN_ELSE,
+																		TypeContext.IN_SWITCH);
+	
+	private final static EnumSet<TypeContext> rootContext = EnumSet.of(TypeContext.IN_CLASS, 
+																		TypeContext.IN_RECORD, 
+																		TypeContext.IN_INTERFACE, 
+																		TypeContext.IN_ENUM);
+	
+	public StateSnapshot() {
+		this.preparedContext = null;
+		this.currentContext = null;
+		this.braceDepth = 0;
+		this.parenDepth = 0;
+	}
+	
+	private StateSnapshot(TypeContext preparedContext, TypeContext currentContext, int braceDepth, int parenDepth) {
+		verifyStructuralConsistency(preparedContext, currentContext, braceDepth, parenDepth);
+		this.preparedContext = preparedContext;
+		this.currentContext = currentContext;
+		this.braceDepth = braceDepth;
+		this.parenDepth = parenDepth;
+	}
+
+	private void verifyStructuralConsistency(TypeContext preparedContext, TypeContext currentContext, int braceDepth, int parenDepth) {
+		if((braceDepth > 0 || parenDepth > 0) && currentContext == null) {
+			throw new StructuralInconsistencyException("Missing context in structural hierarchy.");
+		}
+		if(braceDepth == 0 && parenDepth == 0 && 
+				(currentContext != null && currentContext != TypeContext.IN_GENERIC &&
+				!ignoredContext.contains(currentContext))) {
+			throw new StructuralInconsistencyException(
+				    "Context can not exist without structural hierarchy. "
+				    + "context=" + currentContext
+				    + ", braceDepth=" + braceDepth
+				    + ", parenDepth=" + parenDepth
+				);
+		}
+	}
+	
+	public StateSnapshot prepareContext(TypeContext context) {
+		if(context == null) {throw new ParserStateException("Impossible to prepare a null context.");}
+		return new StateSnapshot(context, currentContext, braceDepth, parenDepth);
+	}
+	
+	public StateSnapshot openBraceContext() {
+		if(ignoredContext.contains(currentContext)) {
+			throw new ParserStateException("Impossible to open new context during an ignored context.");
+		}
+		TypeContext context= null;
+		
+		
+		if(currentContext == TypeContext.IN_LAMBDA) {context = TypeContext.IN_LAMBDA_BLOCK;}
+		if(currentContext == TypeContext.IN_SWITCH_CASE) {context = TypeContext.IN_SWITCH_CASE_BLOCK;}
+		
+		if(context == null){context = TypeContext.IN_METHOD;}
+
+		if(context == TypeContext.IN_LAMBDA_BLOCK && currentContext != TypeContext.IN_LAMBDA)  {
+			throw new ParserStateException("Impossible to open LAMBDA BLOCK context outside LAMBDA.");
+		}
+		if(context == TypeContext.IN_SWITCH_CASE_BLOCK && currentContext != TypeContext.IN_SWITCH_CASE)  {
+			throw new ParserStateException("Impossible to open SWITCH CASE BLOCK context outside SWITCH CASE.");
+		}
+		if(context == TypeContext.IN_SWITCH_CASE && currentContext != TypeContext.IN_SWITCH)  {
+			throw new ParserStateException("Impossible to open SWITCH CASE context outside SWITCH.");
+		}
+		
+		return new StateSnapshot(preparedContext, context, braceDepth +1 , parenDepth);
+	}
+	
+	public StateSnapshot openParenContext() {
+		if(ignoredContext.contains(currentContext)) {
+			throw new ParserStateException("Impossible to open new context during an ignored context.");
+		}
+		TypeContext context= null;
+		
+		if(preparedContext == null && currentContext != null && rootContext.contains(currentContext)) {context = TypeContext.IN_PARAMETERS_DECLARATION;}
+		if(preparedContext == TypeContext.IN_RECORD){context = TypeContext.IN_PARAMETERS_DECLARATION;}
+		if(preparedContext != null && controlStructureContext.contains(preparedContext)) {context = TypeContext.IN_BOOLEAN_EXPRESSION;}
+		if(currentContext == TypeContext.IN_BOOLEAN_EXPRESSION) {context = TypeContext.IN_UNCERTAIN_PAREN_IN_BOOLEAN;}
+		
+		if(context == null){context = TypeContext.IN_UNCERTAIN_PAREN;}
+		return new StateSnapshot(preparedContext, context, braceDepth , parenDepth +1);
+	}
+
+	public StateSnapshot openSpecificContext(TypeContext context) {
+		if(context == null) {throw new ParserStateException("Impossible to open a null specific context.");}
+		return new StateSnapshot(preparedContext, context, braceDepth, parenDepth);
+	}
+
+	public StateSnapshot openBraceSpecificContext(TypeContext context) {
+		if(context == null) {throw new ParserStateException("Impossible to open a null specific context.");}
+		return new StateSnapshot(preparedContext, context, braceDepth+1, parenDepth);
+	}
+
+	public int getBraceDepth() {
+		return braceDepth;
+	}
+
+	public int getParenDepth() {
+		return parenDepth;
+	}
+
+	public TypeContext getCurrentContext() {
+		return currentContext;
+	}
+
+	public TypeContext getPreparedContext() {
+		return preparedContext;
+	}
+
+	@Override
+	public String toString() {
+		return "// prepared context = "+preparedContext +" current context = "+ currentContext ;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj) {return true;}
+		if (!(obj instanceof StateSnapshot other)) {return false;}
+		return braceDepth == other.braceDepth
+				&& parenDepth == other.parenDepth
+				&& currentContext == other.currentContext
+				&& preparedContext == other.preparedContext;
+	}
+	
+}
