@@ -7,10 +7,10 @@ import extractor.exception.ParserStateException;
 import extractor.exception.StructuralInconsistencyException;
 
 /**
-*Immutable parser state snapshot.
-*
-*Captures the active structural context,
-*pending context transitions, and structural depths.
+* Immutable parser state snapshot.
+* 
+* Captures the active structural context,
+* pending context transitions, and structural depths.
 */
 public class StateSnapshot {
 	
@@ -60,8 +60,14 @@ public class StateSnapshot {
 			throw new StructuralInconsistencyException("Missing context in structural hierarchy.");
 		}
 		if(braceDepth == 0 && parenDepth == 0 && 
-				(currentContext != null && currentContext != TypeContext.IN_GENERIC)) {
-			throw new StructuralInconsistencyException("Context can not exist without structural hierarchy.");
+				(currentContext != null && currentContext != TypeContext.IN_GENERIC &&
+				!ignoredContext.contains(currentContext))) {
+			throw new StructuralInconsistencyException(
+				    "Context can not exist without structural hierarchy. "
+				    + "context=" + currentContext
+				    + ", braceDepth=" + braceDepth
+				    + ", parenDepth=" + parenDepth
+				);
 		}
 	}
 	

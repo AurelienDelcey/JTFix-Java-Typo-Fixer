@@ -83,18 +83,29 @@ public class SingleFileExtractor {
 		filename = path.getFileName().toString();
 		offsets = datacontext.linesOffsets();
 		
-		for(int i=0; i<file.length; i++) {
-			char currentChar = file[i];
-			Optional<Token> maybeToken = extractToken(currentChar, i, file);
-			maybeToken.ifPresent((word)-> handleWord(word, file, (token)->tokens.add(token)));
-			processCharacter(currentChar, i, file);
+		try {
+			for(int i=0; i<file.length; i++) {
+				char currentChar = file[i];
+				Optional<Token> maybeToken = extractToken(currentChar, i, file);
+				maybeToken.ifPresent((word)-> handleWord(word, file, (token)->tokens.add(token)));
+				processCharacter(currentChar, i, file);
+			}
+			
+			int startIndexOfLastWord = identifierTracker.flushPendingIdentifier();
+			if (startIndexOfLastWord != -1) {handleEofWord(tokens, file, startIndexOfLastWord);}
+			
+			finalizeFileParsing();
+			return new FileExtraction(new TokenizedFile(tokens, datacontext, path), knownTypes, knownEnums);
+		}
+		catch (StructuralInconsistencyException e) {
+			throw new StructuralInconsistencyException(
+				    "["
+				    + filename
+				    + "] "
+				    + e.getMessage()
+				);
 		}
 		
-		int startIndexOfLastWord = identifierTracker.flushPendingIdentifier();
-		if (startIndexOfLastWord != -1) {handleEofWord(tokens, file, startIndexOfLastWord);}
-		
-		finalizeFileParsing();
-		return new FileExtraction(new TokenizedFile(tokens, datacontext, path), knownTypes, knownEnums);
 	}
 
 	private Optional<Token> extractToken(char c, int index, char[] file) {
@@ -140,6 +151,11 @@ public class SingleFileExtractor {
 				return;
 				}
 		}
+		if("record".equals(token.name())) {
+			if(!isIdentifierStart(nextNonBlankChar(token.endIndex(), file))) {
+				return;
+			}
+		}
 		if("do".equals(token.name())) {inDoBlock = true;}
 		if("while".equals(token.name()) && inDoBlock) {inDoBlock = false;return;}
 		if (JAVA_KEY_WORDS.contains(token.name())) {contextController.prepareContext(token.name());return;}
@@ -150,6 +166,18 @@ public class SingleFileExtractor {
 			knownTypes.add(token.name());
 		}
 		add.accept(token);
+	}
+
+	private char nextNonBlankChar(int endIndex, char[] file) {
+		for(int i = endIndex; i < file.length; i++) {
+			if(!Character.isWhitespace(file[i])) {
+				return file[i];
+			}
+		}
+		return '.';
+	}
+	private boolean isIdentifierStart (char c) {
+		return Character.isLetter(c) || c == '_' || c == '$';
 	}
 
 	private void handleEofWord(List<Token> tokens, char[] file, int startIndexOfLastWord) {
@@ -169,10 +197,23 @@ public class SingleFileExtractor {
 
 	private void closeBraceLessContexts(char c, StateSnapshot contextSnapshot) {
 		if(contextController.getState().getPreparedContext() == TypeContext.IN_FOR) {return;}
-		if(c==';' && ((contextController.getState().getPreparedContext() != null && closableWithoutBraceContext.contains(contextController.getState().getPreparedContext()))||
-				(contextController.getState().getCurrentContext() != null && contextController.getState().getCurrentContext() == TypeContext.IN_SWITCH_CASE))){
-			contextController.closeContext();
+		if(c==';' && ((isControlStructurePrepared()||
+				      isSwitchCaseContext()) || 
+					  isLambdaContext())){
+			contextController.closeContext(c);
 		}
+	}
+
+	private boolean isControlStructurePrepared() {
+		return contextController.getState().getPreparedContext() != null && closableWithoutBraceContext.contains(contextController.getState().getPreparedContext());
+	}
+
+	private boolean isLambdaContext() {
+		return contextController.getState().getCurrentContext() != null && contextController.getState().getCurrentContext() == TypeContext.IN_LAMBDA;
+	}
+
+	private boolean isSwitchCaseContext() {
+		return contextController.getState().getCurrentContext() != null && contextController.getState().getCurrentContext() == TypeContext.IN_SWITCH_CASE;
 	}
 
 	private void applyStructuralTransition(char c, int index) {
@@ -180,8 +221,9 @@ public class SingleFileExtractor {
 			contextController.openBraceContext();
 		}else if (c=='('){
 			contextController.openParenContext();
-		}else if(c=='}' || c==')') {
-			if(!contextController.closeContext()) {
+		}else if(c=='}' || c==')' ||
+				(c==',' && contextController.currentContext() == TypeContext.IN_LAMBDA)) {
+			if(!contextController.closeContext(c)) {
 				log.debug("[CONTEXT]: Try to pop empty context : file = {} index = {}", filename, index);
 			}
 		}
@@ -210,6 +252,9 @@ public class SingleFileExtractor {
 	private void finalizeFileParsing() {
 		log.debug("[EOF] {}: Context stack state = {}, Depth: brace = {} / paren = {}", filename, contextController.debugContextStack(), contextController.getState().getBraceDepth(), contextController.getState().getParenDepth());
 		if(!contextController.isEmptyStack()) {
+			if(contextController.getState().getCurrentContext()==TypeContext.IN_COMMENT_LINE) {
+				contextController.closeContext(' ');
+			}
 			throw new StructuralInconsistencyException( "EOF reached with unclosed contexts in file '%s': %s"
 			        .formatted(filename, contextController.debugContextStack()));
 		}

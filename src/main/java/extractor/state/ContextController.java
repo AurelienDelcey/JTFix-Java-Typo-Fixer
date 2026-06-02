@@ -23,6 +23,10 @@ public class ContextController {
 																	TypeContext.IN_FOR,
 																	TypeContext.IN_WHILE,
 																	TypeContext.IN_ELSE);
+	private static final Set<TypeContext> parenContext = Set.of(TypeContext.IN_UNCERTAIN_PAREN,
+																	TypeContext.IN_UNCERTAIN_PAREN_IN_BOOLEAN,
+																	TypeContext.IN_PARAMETERS_DECLARATION
+																	);
 	
 	public void openBraceContext() {
 		if(states.isEmpty()) {states.push(new StateSnapshot().openBraceContext());return;}
@@ -40,7 +44,7 @@ public class ContextController {
 		TypeContext current = currentContext();
 		switch(event) {
 		case OPEN_ON_ARROW->resolveArrowTransition(current);
-		case CLOSE_CONTEXT->{closeContext();}
+		case CLOSE_CONTEXT->{closeContext(' ');}
 		case OPEN_STRING->{pushSpecific(TypeContext.IN_STRING);}
 		case OPEN_COMMENT_LINE->{pushSpecific(TypeContext.IN_COMMENT_LINE);}
 		case OPEN_COMMENT_BLOCK->{pushSpecific(TypeContext.IN_COMMENT_BLOCK);}
@@ -87,11 +91,17 @@ public class ContextController {
 				implicitContext.contains(newPreparedContext);
 	}
 
-	public boolean closeContext() {
+	public boolean closeContext(char c) {
 		if(states.isEmpty()) {return false;}
 		StateSnapshot state = states.pop();
 		if(states.isEmpty()) {return true;}
 		
+		if(c == ')' && state.getCurrentContext() == TypeContext.IN_LAMBDA) {
+			if(parenContext.contains(states.peek().getCurrentContext())){
+				log.debug("[CLOSE] collapse paren context from lambda");
+				states.pop();
+			}
+		}
 		if(state.getCurrentContext() == TypeContext.IN_LAMBDA_BLOCK) {
 			if(states.peek().getCurrentContext() == TypeContext.IN_LAMBDA) {
 				log.debug("[CLOSE] collapse lambda context");

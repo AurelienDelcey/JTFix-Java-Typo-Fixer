@@ -30,7 +30,7 @@ public class GenericTracker {
 			if(file[i] == '>') {return true;}
 			if(file[i] == '=' || file[i] == '|' || file[i] == '&' || 
 					file[i] == ';' || file[i] == ')' || file[i] == '(' || 
-					file[i] == '{' || file[i] == '}') {return false;}
+					file[i] == '{' || file[i] == '}' || file[i] == '-') {return false;}
 		}
 		return false;
 	}

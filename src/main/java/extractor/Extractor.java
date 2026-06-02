@@ -43,7 +43,7 @@ public class Extractor {
 		List<FileExtraction> extractionResult = new ArrayList<>();
 		
 		for(Path path : mapData.keySet()) {
-			Future<FileExtraction> extractedFile = exec.submit(() -> extractOne(mapData, path));
+			Future<FileExtraction> extractedFile = exec.submit(()-> extractOne(mapData, path));
 			resultList.add(extractedFile);
 		}
 		
@@ -58,9 +58,9 @@ public class Extractor {
 			} catch (ExecutionException e) {
 				Throwable cause = e.getCause();
                 if (cause instanceof ParserException) {
-                    return new Failure<>("extractor failed: " + cause.getMessage());
+                    return new Failure<>("extractor failed: " +cause.getMessage());
                 }
-				return new Failure<>("extractor failed: " + e.getMessage());
+				return new Failure<>("extractor failed: "+ e.getMessage());
 			}
 		}
 		return new Success<>(mergeResult(extractionResult));
