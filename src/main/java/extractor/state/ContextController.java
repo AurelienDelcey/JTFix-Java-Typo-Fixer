@@ -73,13 +73,17 @@ public class ContextController {
 		};
 		if (newPreparedContext == null) {return;}
 		
-		log.debug("[PREPARE] prepare context: {}", newPreparedContext);
+		if(log.isDebugEnabled()) {
+			log.debug("[PREPARE] prepare context: {}", newPreparedContext);
+		}
 		
 		StateSnapshot state = states.peek();
 		state = state != null ? state : new StateSnapshot();
 		
 		if (shouldReplaceImplicitPreparedContext(newPreparedContext, state)) {
-			log.debug("[PREPARE] replace implicit context: {} -> {}", state, newPreparedContext);
+			if(log.isDebugEnabled()) {
+				log.debug("[PREPARE] replace implicit context: {} -> {}", state, newPreparedContext);
+			}
 			states.pop();
 			}
 		
@@ -159,7 +163,9 @@ public class ContextController {
 	private void openPreparedContext() {
 		StateSnapshot state = states.pop();
 		TypeContext preparedContext = state.getPreparedContext();
-		log.debug("[PREPARE] commit prepared context: {}", preparedContext);
+		if(log.isDebugEnabled()) {
+			log.debug("[PREPARE] commit prepared context: {}", preparedContext);
+		}
 		if(states.isEmpty()) {states.push(new StateSnapshot().openBraceSpecificContext(preparedContext));return;}
 		states.push(states.peek().openBraceSpecificContext(preparedContext));
 		return;

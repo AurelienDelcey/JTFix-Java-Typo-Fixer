@@ -28,12 +28,16 @@ public class StateStack {
 		        "Impossible to close context from empty stack."
 		    );
 		}
-		log.debug("[STACK] close context request: {}", states.peek().getCurrentContext());
+		if(log.isDebugEnabled()) {
+			log.debug("[STACK] close context request: {}", states.peek().getCurrentContext());
+		}
 		return states.pop();
 	}
 
 	public void push(StateSnapshot snapshot) {
-		log.debug("[STACK] open context requested: {}", snapshot);
+		if(log.isDebugEnabled()) {
+			log.debug("[STACK] open context requested: {}", snapshot);
+		}
 		states.push(snapshot);
 	}
 
